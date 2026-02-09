@@ -240,6 +240,30 @@ function formatDateTime(iso: string | null): string {
   });
 }
 
+function getProjectColorClass(project: string): string {
+  if (!project || project === "No project") {
+    return "border-slate-300 bg-slate-100/90";
+  }
+
+  const palette = [
+    "border-rose-300 bg-rose-100/90",
+    "border-amber-300 bg-amber-100/90",
+    "border-emerald-300 bg-emerald-100/90",
+    "border-cyan-300 bg-cyan-100/90",
+    "border-sky-300 bg-sky-100/90",
+    "border-indigo-300 bg-indigo-100/90",
+    "border-lime-300 bg-lime-100/90",
+    "border-orange-300 bg-orange-100/90",
+    "border-teal-300 bg-teal-100/90",
+  ];
+
+  let hash = 0;
+  for (let i = 0; i < project.length; i += 1) {
+    hash = (hash * 31 + project.charCodeAt(i)) >>> 0;
+  }
+  return palette[hash % palette.length];
+}
+
 function buildSummary(entries: TimeEntry[]) {
   const totals = new Map<string, number>();
   entries.forEach((entry) => {
@@ -610,11 +634,12 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
 
                       {timeline.blocks.map((block) => {
                         const sourceEntry = data.entries.find((entry) => `${entry.id}-${new Date(entry.start).getTime()}` === block.id);
+                        const colorClass = getProjectColorClass(block.project);
                         return (
                         <button
                           key={block.id}
                           type="button"
-                          className="absolute overflow-hidden rounded-lg border border-sky-300 bg-sky-100/90 px-2 py-1 shadow-sm"
+                          className={`absolute overflow-hidden rounded-lg border px-2 py-1 text-left shadow-sm ${colorClass}`}
                           style={{
                             top: `${block.topPx}px`,
                             height: `${block.heightPx}px`,
@@ -784,11 +809,12 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                             ?.entries.find(
                               (entry) => `${entry.id}-${new Date(entry.start).getTime()}` === block.id
                             );
+                          const colorClass = getProjectColorClass(block.project);
                           return (
                             <button
                               key={block.id}
                               type="button"
-                              className="absolute overflow-hidden rounded-lg border border-cyan-300 bg-cyan-100/90 px-2 py-1 text-left shadow-sm"
+                              className={`absolute overflow-hidden rounded-lg border px-2 py-1 text-left shadow-sm ${colorClass}`}
                               style={{
                                 top: `${block.topPx}px`,
                                 height: `${block.heightPx}px`,
