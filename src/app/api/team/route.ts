@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  fetchCurrentEntry,
   fetchProjectNames,
   fetchTimeEntries,
   getEntryProjectName,
@@ -10,12 +9,12 @@ import {
 } from "@/lib/toggl";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const CACHE_TTL_MS = 5 * 60 * 1000;
+const CACHE_TTL_MS = 10 * 60 * 1000;
 
 type MemberPayload = {
   name: string;
   entries: Array<Awaited<ReturnType<typeof fetchTimeEntries>>[number] & { project_name?: string | null }>;
-  current: (Awaited<ReturnType<typeof fetchCurrentEntry>> & { project_name?: string | null }) | null;
+  current: null;
   totalSeconds: number;
 };
 
@@ -67,7 +66,6 @@ export async function GET(request: NextRequest) {
 
   const startDate = `${dateInput}T00:00:00Z`;
   const endDate = `${dateInput}T23:59:59Z`;
-  const isTodayUtc = dateInput === new Date().toISOString().slice(0, 10);
 
   try {
     const results = await Promise.all(
@@ -77,21 +75,12 @@ export async function GET(request: NextRequest) {
           return { name: member.name, entries: [], current: null, totalSeconds: 0 };
         }
 
-        const [entries, current] = await Promise.all([
-          fetchTimeEntries(token, startDate, endDate),
-          isTodayUtc ? fetchCurrentEntry(token) : Promise.resolve(null),
-        ]);
-        const projectNames = await fetchProjectNames(token, current ? [...entries, current] : entries);
+        const entries = await fetchTimeEntries(token, startDate, endDate);
+        const projectNames = await fetchProjectNames(token, entries);
         const sortedEntries = sortEntriesByStart(entries).map((entry) => ({
           ...entry,
           project_name: getEntryProjectName(entry, projectNames),
         }));
-        const enrichedCurrent = current
-          ? {
-              ...current,
-              project_name: getEntryProjectName(current, projectNames),
-            }
-          : null;
 
         const totalSeconds = sortedEntries.reduce((acc, entry) => {
           if (entry.duration >= 0) return acc + entry.duration;
@@ -101,7 +90,7 @@ export async function GET(request: NextRequest) {
           return acc + runningSeconds;
         }, 0);
 
-        return { name: member.name, entries: sortedEntries, current: enrichedCurrent, totalSeconds };
+        return { name: member.name, entries: sortedEntries, current: null, totalSeconds };
       })
     );
 

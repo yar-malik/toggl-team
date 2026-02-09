@@ -134,6 +134,7 @@ type EntryModalData = {
   project: string;
   start: string | null;
   end: string | null;
+  durationSeconds: number;
 };
 
 function buildTimelineBlocks(entries: TimeEntry[], dateInput: string) {
@@ -244,6 +245,14 @@ function formatDateTime(iso: string | null): string {
   });
 }
 
+function formatWaitMinutes(secondsRaw: string | null): string | null {
+  if (!secondsRaw) return null;
+  const seconds = Number(secondsRaw);
+  if (!Number.isFinite(seconds) || seconds < 0) return null;
+  const minutes = Math.max(1, Math.ceil(seconds / 60));
+  return `${minutes} min`;
+}
+
 function getProjectColorClass(project: string): string {
   if (!project || project === "No project") {
     return "border-slate-300 bg-slate-100/90";
@@ -293,7 +302,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
   const [retryAfter, setRetryAfter] = useState<string | null>(null);
   const [quotaRemaining, setQuotaRemaining] = useState<string | null>(null);
   const [quotaResetsIn, setQuotaResetsIn] = useState<string | null>(null);
-  const [mode, setMode] = useState<"member" | "team">("member");
+  const [mode, setMode] = useState<"member" | "team" | "all">("member");
   const [selectedEntry, setSelectedEntry] = useState<EntryModalData | null>(null);
 
   const hasMembers = members.length > 0;
@@ -314,7 +323,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
     const lastSelection = localStorage.getItem(LAST_KEY);
     if (lastSelection) {
       try {
-        const parsed = JSON.parse(lastSelection) as { member?: string; date?: string; mode?: "member" | "team" };
+        const parsed = JSON.parse(lastSelection) as { member?: string; date?: string; mode?: "member" | "team" | "all" };
         if (parsed.member && members.some((item) => item.name === parsed.member)) {
           setMember(parsed.member);
         }
@@ -347,7 +356,10 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
     setQuotaResetsIn(null);
 
     const params = new URLSearchParams({ date });
-    const url = mode === "team" ? `/api/team?${params.toString()}` : `/api/entries?${new URLSearchParams({ member, date }).toString()}`;
+    const url =
+      mode === "team" || mode === "all"
+        ? `/api/team?${params.toString()}`
+        : `/api/entries?${new URLSearchParams({ member, date }).toString()}`;
 
     fetch(url)
       .then(async (res) => {
@@ -369,7 +381,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
       })
       .then((payload) => {
         if (!active) return;
-        if (mode === "team") {
+        if (mode === "team" || mode === "all") {
           setTeamData(payload as TeamResponse);
           setData(null);
         } else {
@@ -438,8 +450,20 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
       project: entry.project_name?.trim() || "No project",
       start: entry.start,
       end: entry.stop,
+      durationSeconds: getEntrySeconds(entry),
     });
   };
+
+  useEffect(() => {
+    if (!selectedEntry) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSelectedEntry(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectedEntry]);
 
   const handleSaveFilter = () => {
     if (!member) return;
@@ -500,6 +524,15 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
           onClick={() => setMode("team")}
         >
           Team overview
+        </button>
+        <button
+          type="button"
+          className={`rounded-full px-4 py-2 text-sm font-semibold ${
+            mode === "all" ? "bg-slate-900 text-white" : "bg-white text-slate-600 border border-slate-200"
+          }`}
+          onClick={() => setMode("all")}
+        >
+          All calendars
         </button>
       </div>
 
@@ -604,13 +637,13 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
       {error && (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-rose-800">
           <p>{error}</p>
-          {retryAfter && (
-            <p className="mt-2 text-sm text-rose-700">Retry after {retryAfter} seconds.</p>
+          {formatWaitMinutes(retryAfter) && (
+            <p className="mt-2 text-sm text-rose-700">Retry after {formatWaitMinutes(retryAfter)}.</p>
           )}
           {(quotaRemaining || quotaResetsIn) && (
             <div className="mt-2 text-sm text-rose-700">
               {quotaRemaining && <p>Quota remaining: {quotaRemaining}</p>}
-              {quotaResetsIn && <p>Quota resets in: {quotaResetsIn} seconds.</p>}
+              {formatWaitMinutes(quotaResetsIn) && <p>Quota resets in: {formatWaitMinutes(quotaResetsIn)}.</p>}
             </div>
           )}
         </div>
@@ -739,56 +772,60 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
         </div>
       )}
 
-      {!loading && !error && mode === "team" && teamData && (
+      {!loading && !error && (mode === "team" || mode === "all") && teamData && (
         <div className="space-y-4">
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900">Team ranking</h2>
-                <p className="text-sm text-slate-500">
-                  Ranking uses closed entries only. Each entry is capped at 4h, so nonstop timers do not dominate.
-                </p>
+          {mode === "team" && (
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-900">Team ranking</h2>
+                  <p className="text-sm text-slate-500">
+                    Ranking uses closed entries only. Each entry is capped at 4h, so nonstop timers do not dominate.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4 overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-left text-slate-500">
+                      <th className="px-2 py-2 font-semibold">Rank</th>
+                      <th className="px-2 py-2 font-semibold">Member</th>
+                      <th className="px-2 py-2 font-semibold">Ranked hours</th>
+                      <th className="px-2 py-2 font-semibold">Entries</th>
+                      <th className="px-2 py-2 font-semibold">Started</th>
+                      <th className="px-2 py-2 font-semibold">Ended</th>
+                      <th className="px-2 py-2 font-semibold">Longest break</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {teamRanking.length === 0 && (
+                      <tr>
+                        <td className="px-2 py-3 text-slate-500" colSpan={7}>
+                          No entries yet.
+                        </td>
+                      </tr>
+                    )}
+                    {teamRanking.map((row, index) => (
+                      <tr key={row.name} className="border-b border-slate-100">
+                        <td className="px-2 py-2 font-semibold text-slate-900">{index + 1}</td>
+                        <td className="px-2 py-2 text-slate-800">{row.name}</td>
+                        <td className="px-2 py-2 text-slate-800">{formatDuration(row.rankedSeconds)}</td>
+                        <td className="px-2 py-2 text-slate-800">{row.entryCount}</td>
+                        <td className="px-2 py-2 text-slate-700">{formatTime(row.firstStart)}</td>
+                        <td className="px-2 py-2 text-slate-700">{formatTime(row.lastEnd)}</td>
+                        <td className="px-2 py-2 text-slate-700">{formatDuration(row.longestBreakSeconds)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
-            <div className="mt-4 overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 text-left text-slate-500">
-                    <th className="px-2 py-2 font-semibold">Rank</th>
-                    <th className="px-2 py-2 font-semibold">Member</th>
-                    <th className="px-2 py-2 font-semibold">Ranked hours</th>
-                    <th className="px-2 py-2 font-semibold">Entries</th>
-                    <th className="px-2 py-2 font-semibold">Started</th>
-                    <th className="px-2 py-2 font-semibold">Ended</th>
-                    <th className="px-2 py-2 font-semibold">Longest break</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {teamRanking.length === 0 && (
-                    <tr>
-                      <td className="px-2 py-3 text-slate-500" colSpan={7}>
-                        No entries yet.
-                      </td>
-                    </tr>
-                  )}
-                  {teamRanking.map((row, index) => (
-                    <tr key={row.name} className="border-b border-slate-100">
-                      <td className="px-2 py-2 font-semibold text-slate-900">{index + 1}</td>
-                      <td className="px-2 py-2 text-slate-800">{row.name}</td>
-                      <td className="px-2 py-2 text-slate-800">{formatDuration(row.rankedSeconds)}</td>
-                      <td className="px-2 py-2 text-slate-800">{row.entryCount}</td>
-                      <td className="px-2 py-2 text-slate-700">{formatTime(row.firstStart)}</td>
-                      <td className="px-2 py-2 text-slate-700">{formatTime(row.lastEnd)}</td>
-                      <td className="px-2 py-2 text-slate-700">{formatDuration(row.longestBreakSeconds)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          )}
 
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-semibold text-slate-900">Team day calendar</h2>
+            <h2 className="text-lg font-semibold text-slate-900">
+              {mode === "all" ? "All team calendars" : "Team day calendar"}
+            </h2>
             <p className="text-sm text-slate-500">
               One shared daily timeline for everyone. Matching vertical positions indicate overlap.
             </p>
@@ -849,6 +886,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                               }}
                             >
                               <p className="truncate text-xs font-semibold text-slate-900">{block.title}</p>
+                              <p className="truncate text-[11px] text-slate-700">Project: {block.project}</p>
                               <p className="truncate text-[11px] text-slate-700">{block.timeRange}</p>
                             </button>
                           );
@@ -861,47 +899,49 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {teamData.members.map((memberData) => {
-              const running = memberData.current && memberData.current.duration < 0 ? memberData.current : null;
-              const memberSummary = buildSummary(memberData.entries).slice(0, 3);
-              return (
-                <div key={memberData.name} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="text-lg font-semibold text-slate-900">{memberData.name}</h3>
-                      <p className="text-sm text-slate-500">Total {formatDuration(memberData.totalSeconds)}</p>
-                    </div>
-                    <span
-                      className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                        running ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
-                      }`}
-                    >
-                      {running ? "Running" : "Idle"}
-                    </span>
-                  </div>
-                  <div className="mt-4">
-                    {running ? (
-                      <p className="text-sm text-emerald-700">Now: {running.description || "(No description)"}</p>
-                    ) : (
-                      <p className="text-sm text-slate-500">No active timer.</p>
-                    )}
-                  </div>
-                  <div className="mt-4 space-y-1">
-                    {memberSummary.length === 0 && (
-                      <p className="text-sm text-slate-500">No entries yet.</p>
-                    )}
-                    {memberSummary.map((item) => (
-                      <div key={item.label} className="flex items-center justify-between text-sm">
-                        <span className="text-slate-600">{item.label}</span>
-                        <span className="font-medium text-slate-900">{formatDuration(item.seconds)}</span>
+          {mode === "team" && (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {teamData.members.map((memberData) => {
+                const running = memberData.entries.find((entry) => entry.duration < 0) ?? null;
+                const memberSummary = buildSummary(memberData.entries).slice(0, 3);
+                return (
+                  <div key={memberData.name} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <h3 className="text-lg font-semibold text-slate-900">{memberData.name}</h3>
+                        <p className="text-sm text-slate-500">Total {formatDuration(memberData.totalSeconds)}</p>
                       </div>
-                    ))}
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                          running ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
+                        }`}
+                      >
+                        {running ? "Running" : "Idle"}
+                      </span>
+                    </div>
+                    <div className="mt-4">
+                      {running ? (
+                        <p className="text-sm text-emerald-700">Now: {running.description || "(No description)"}</p>
+                      ) : (
+                        <p className="text-sm text-slate-500">No active timer.</p>
+                      )}
+                    </div>
+                    <div className="mt-4 space-y-1">
+                      {memberSummary.length === 0 && (
+                        <p className="text-sm text-slate-500">No entries yet.</p>
+                      )}
+                      {memberSummary.map((item) => (
+                        <div key={item.label} className="flex items-center justify-between text-sm">
+                          <span className="text-slate-600">{item.label}</span>
+                          <span className="font-medium text-slate-900">{formatDuration(item.seconds)}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -942,6 +982,10 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
               <p>
                 <span className="font-semibold text-slate-900">End:</span>{" "}
                 {selectedEntry.end ? formatDateTime(selectedEntry.end) : "Running"}
+              </p>
+              <p>
+                <span className="font-semibold text-slate-900">Duration:</span>{" "}
+                {formatDuration(selectedEntry.durationSeconds)}
               </p>
             </div>
           </div>
