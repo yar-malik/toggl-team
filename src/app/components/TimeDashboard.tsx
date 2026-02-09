@@ -38,6 +38,24 @@ type TeamResponse = {
   quotaResetsIn?: string | null;
 };
 
+type TeamWeekResponse = {
+  startDate: string;
+  endDate: string;
+  weekDates: string[];
+  members: Array<{
+    name: string;
+    totalSeconds: number;
+    entryCount: number;
+    days: Array<{ date: string; seconds: number; entryCount: number }>;
+  }>;
+  cachedAt?: string;
+  stale?: boolean;
+  warning?: string | null;
+  error?: string;
+  quotaRemaining?: string | null;
+  quotaResetsIn?: string | null;
+};
+
 type SavedFilter = {
   id: string;
   name: string;
@@ -248,6 +266,12 @@ function formatDateTime(iso: string | null): string {
   });
 }
 
+function formatShortDateLabel(dateInput: string): string {
+  const date = new Date(`${dateInput}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return dateInput;
+  return date.toLocaleDateString([], { weekday: "short", month: "numeric", day: "numeric" });
+}
+
 function formatWaitMinutes(secondsRaw: string | null): string | null {
   if (!secondsRaw) return null;
   const seconds = Number(secondsRaw);
@@ -300,6 +324,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
   const [savedFilters, setSavedFilters] = useState<SavedFilter[]>([]);
   const [data, setData] = useState<EntriesResponse | null>(null);
   const [teamData, setTeamData] = useState<TeamResponse | null>(null);
+  const [teamWeekData, setTeamWeekData] = useState<TeamWeekResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retryAfter, setRetryAfter] = useState<string | null>(null);
@@ -417,6 +442,37 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
     };
   }, [member, date, mode, teamRefreshTick]);
 
+  useEffect(() => {
+    if (!(mode === "team" || mode === "all")) return;
+    let active = true;
+
+    const params = new URLSearchParams({ date });
+    if (forceTeamRefreshRef.current) {
+      params.set("refresh", "1");
+    }
+
+    fetch(`/api/team-week?${params.toString()}`)
+      .then(async (res) => {
+        const payload = (await res.json()) as TeamWeekResponse;
+        if (!res.ok || payload.error) {
+          throw new Error(payload.error || "Failed to load 7-day summary");
+        }
+        return payload;
+      })
+      .then((payload) => {
+        if (!active) return;
+        setTeamWeekData(payload);
+      })
+      .catch(() => {
+        if (!active) return;
+        // keep previous weekly snapshot if fetch fails
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [mode, date, teamRefreshTick]);
+
   const runningEntry = useMemo(() => {
     if (!data?.current) return null;
     if (data.current.duration >= 0) return null;
@@ -520,38 +576,40 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          className={`rounded-full px-4 py-2 text-sm font-semibold ${
-            mode === "member" ? "bg-slate-900 text-white" : "bg-white text-slate-600 border border-slate-200"
-          }`}
-          onClick={() => setMode("member")}
-        >
-          Member view
-        </button>
-        <button
-          type="button"
-          className={`rounded-full px-4 py-2 text-sm font-semibold ${
-            mode === "team" ? "bg-slate-900 text-white" : "bg-white text-slate-600 border border-slate-200"
-          }`}
-          onClick={() => setMode("team")}
-        >
-          Team overview
-        </button>
-        <button
-          type="button"
-          className={`rounded-full px-4 py-2 text-sm font-semibold ${
-            mode === "all" ? "bg-slate-900 text-white" : "bg-white text-slate-600 border border-slate-200"
-          }`}
-          onClick={() => setMode("all")}
-        >
-          All calendars
-        </button>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            className={`rounded-full px-4 py-2 text-sm font-semibold ${
+              mode === "member" ? "bg-slate-900 text-white" : "bg-white text-slate-600 border border-slate-200"
+            }`}
+            onClick={() => setMode("member")}
+          >
+            Member view
+          </button>
+          <button
+            type="button"
+            className={`rounded-full px-4 py-2 text-sm font-semibold ${
+              mode === "team" ? "bg-slate-900 text-white" : "bg-white text-slate-600 border border-slate-200"
+            }`}
+            onClick={() => setMode("team")}
+          >
+            Team overview
+          </button>
+          <button
+            type="button"
+            className={`rounded-full px-4 py-2 text-sm font-semibold ${
+              mode === "all" ? "bg-slate-900 text-white" : "bg-white text-slate-600 border border-slate-200"
+            }`}
+            onClick={() => setMode("all")}
+          >
+            All calendars
+          </button>
+        </div>
         {(mode === "team" || mode === "all") && (
           <button
             type="button"
-            className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+            className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-sky-300"
             onClick={handleTeamRefresh}
             disabled={loading}
           >
@@ -798,6 +856,55 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
 
       {!loading && !error && (mode === "team" || mode === "all") && teamData && (
         <div className="space-y-4">
+          {teamWeekData && (
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="text-lg font-semibold text-slate-900">Last 7 days overview</h2>
+              <p className="text-sm text-slate-500">
+                Ranking by total worked time over the last seven days.
+              </p>
+              {(teamWeekData.warning || teamWeekData.stale) && (
+                <p className="mt-2 text-sm text-amber-700">
+                  {teamWeekData.warning || "Showing cached 7-day snapshot."}
+                </p>
+              )}
+              <div className="mt-4 overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-left text-slate-500">
+                      <th className="px-2 py-2 font-semibold">Rank</th>
+                      <th className="px-2 py-2 font-semibold">Member</th>
+                      <th className="px-2 py-2 font-semibold">Total</th>
+                      <th className="px-2 py-2 font-semibold">Entries</th>
+                      {teamWeekData.weekDates.map((d) => (
+                        <th key={d} className="px-2 py-2 font-semibold">
+                          {formatShortDateLabel(d)}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {teamWeekData.members.map((row, index) => (
+                      <tr key={row.name} className="border-b border-slate-100">
+                        <td className="px-2 py-2 font-semibold text-slate-900">{index + 1}</td>
+                        <td className="px-2 py-2 text-slate-800">{row.name}</td>
+                        <td className="px-2 py-2 text-slate-800">{formatDuration(row.totalSeconds)}</td>
+                        <td className="px-2 py-2 text-slate-800">{row.entryCount}</td>
+                        {teamWeekData.weekDates.map((d) => {
+                          const day = row.days.find((item) => item.date === d);
+                          return (
+                            <td key={`${row.name}-${d}`} className="px-2 py-2 text-slate-700">
+                              {formatDuration(day?.seconds ?? 0)}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {(teamData.warning || teamData.stale) && (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
               <p className="text-sm font-semibold">
