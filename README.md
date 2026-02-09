@@ -2,23 +2,42 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+First, install dependencies and run the development server:
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Toggl Setup
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Copy `.env.local.example` to `.env.local`.
+2. Add each teammate's personal Toggl API token in the JSON array.
+
+Example:
+
+```bash
+TOGGL_TEAM='[
+  {"name": "Alice", "token": "your-token-here"},
+  {"name": "Bob", "token": "your-token-here"}
+]'
+```
+
+Restart the dev server after editing `.env.local`.
+
+## Features
+
+- Daily summary per task description.
+- Teammate search with saved filters stored in local storage.
+- Team overview mode for the whole group.
+- Light server-side caching with basic rate-limit handling.
+
+## Notes
+
+- Tokens are read on the server only and never sent to the browser.
+- The dashboard queries Toggl's API for the selected teammate and date.
 
 ## Learn More
 
