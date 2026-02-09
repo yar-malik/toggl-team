@@ -20,6 +20,9 @@ type EntriesResponse = {
   current: TimeEntry | null;
   totalSeconds: number;
   date: string;
+  cachedAt?: string;
+  stale?: boolean;
+  warning?: string | null;
   error?: string;
   retryAfter?: string | null;
   quotaRemaining?: string | null;
@@ -69,6 +72,7 @@ const HOURS_IN_DAY = 24;
 const HOUR_HEIGHT = 56;
 const MIN_BLOCK_HEIGHT = 24;
 const RANKING_ENTRY_CAP_SECONDS = 4 * 60 * 60;
+const DAY_START_HOUR = 8;
 
 function formatDuration(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
@@ -110,12 +114,13 @@ function getDayBoundsMs(dateInput: string) {
   const year = Number(yearStr);
   const monthIndex = Number(monthStr) - 1;
   const day = Number(dayStr);
-  const start = new Date(year, monthIndex, day, 0, 0, 0, 0).getTime();
-  const end = new Date(year, monthIndex, day, 23, 59, 59, 999).getTime();
+  const start = new Date(year, monthIndex, day, DAY_START_HOUR, 0, 0, 0).getTime();
+  const end = start + 24 * 60 * 60 * 1000 - 1;
   return { start, end };
 }
 
-function formatHourLabel(hour: number): string {
+function formatHourLabel(offset: number): string {
+  const hour = (DAY_START_HOUR + offset) % 24;
   if (hour === 0) return "12 AM";
   if (hour < 12) return `${hour} AM`;
   if (hour === 12) return "12 PM";
@@ -332,8 +337,8 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
   const [quotaResetsIn, setQuotaResetsIn] = useState<string | null>(null);
   const [mode, setMode] = useState<"member" | "team" | "all">("member");
   const [selectedEntry, setSelectedEntry] = useState<EntryModalData | null>(null);
-  const [teamRefreshTick, setTeamRefreshTick] = useState(0);
-  const forceTeamRefreshRef = useRef(false);
+  const [manualRefreshTick, setManualRefreshTick] = useState(0);
+  const forceRefreshRef = useRef(false);
 
   const hasMembers = members.length > 0;
 
@@ -376,6 +381,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
   }, [member, date, mode]);
 
   useEffect(() => {
+    if (!forceRefreshRef.current) return;
     if (!member && mode === "member") return;
 
     let active = true;
@@ -386,7 +392,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
     setQuotaResetsIn(null);
 
     const params = new URLSearchParams({ date });
-    if ((mode === "team" || mode === "all") && forceTeamRefreshRef.current) {
+    if (forceRefreshRef.current) {
       params.set("refresh", "1");
     }
     const url =
@@ -433,21 +439,22 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
       })
       .finally(() => {
         if (!active) return;
-        forceTeamRefreshRef.current = false;
+        forceRefreshRef.current = false;
         setLoading(false);
       });
 
     return () => {
       active = false;
     };
-  }, [member, date, mode, teamRefreshTick]);
+  }, [member, date, mode, manualRefreshTick]);
 
   useEffect(() => {
+    if (!forceRefreshRef.current) return;
     if (!(mode === "team" || mode === "all")) return;
     let active = true;
 
     const params = new URLSearchParams({ date });
-    if (forceTeamRefreshRef.current) {
+    if (forceRefreshRef.current) {
       params.set("refresh", "1");
     }
 
@@ -471,7 +478,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
     return () => {
       active = false;
     };
-  }, [mode, date, teamRefreshTick]);
+  }, [mode, date, manualRefreshTick]);
 
   const runningEntry = useMemo(() => {
     if (!data?.current) return null;
@@ -519,9 +526,9 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
     });
   };
 
-  const handleTeamRefresh = () => {
-    forceTeamRefreshRef.current = true;
-    setTeamRefreshTick((value) => value + 1);
+  const handleManualRefresh = () => {
+    forceRefreshRef.current = true;
+    setManualRefreshTick((value) => value + 1);
   };
 
   useEffect(() => {
@@ -606,16 +613,14 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
             All calendars
           </button>
         </div>
-        {(mode === "team" || mode === "all") && (
-          <button
-            type="button"
-            className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-sky-300"
-            onClick={handleTeamRefresh}
-            disabled={loading}
-          >
-            {loading ? "Refreshing..." : "Refresh now"}
-          </button>
-        )}
+        <button
+          type="button"
+          className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-sky-300"
+          onClick={handleManualRefresh}
+          disabled={loading}
+        >
+          {loading ? "Refreshing..." : "Refresh view"}
+        </button>
       </div>
 
       <div className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-4">
@@ -732,11 +737,21 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
       )}
 
       {!loading && !error && mode === "member" && data && (
-        <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="space-y-4">
+          {(data.warning || data.stale) && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
+              <p className="text-sm font-semibold">{data.warning || "Showing cached snapshot."}</p>
+              {data.cachedAt && (
+                <p className="mt-1 text-sm text-amber-800">Snapshot time: {formatDateTime(data.cachedAt)}</p>
+              )}
+            </div>
+          )}
+
+          <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold text-slate-900">Day view</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Entries are ordered from start of day to end of day.
+              Entries are shown in a workday window from 8:00 AM to next-day 8:00 AM.
             </p>
             <div className="mt-4">
               {data.entries.length === 0 && (
@@ -752,7 +767,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                           className="absolute right-0 pr-2 text-[11px] font-medium text-slate-400"
                           style={{ top: `${hour * HOUR_HEIGHT - 8}px` }}
                         >
-                          {formatHourLabel(hour % 24)}
+                          {formatHourLabel(hour)}
                         </div>
                       ))}
                     </div>
@@ -800,9 +815,9 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                 </div>
               )}
             </div>
-          </div>
+            </div>
 
-          <div className="space-y-4">
+            <div className="space-y-4">
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-emerald-900">
               <h3 className="text-sm font-semibold uppercase tracking-wide">Currently running</h3>
               {runningEntry ? (
@@ -849,6 +864,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                 Entries refresh when you change the date or teammate. Data stays on the server, and
                 requests are lightly cached to reduce rate limits.
               </p>
+            </div>
             </div>
           </div>
         </div>
@@ -980,7 +996,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                       className="absolute right-0 pr-2 text-[11px] font-medium text-slate-400"
                       style={{ top: `${hour * HOUR_HEIGHT - 8}px` }}
                     >
-                      {formatHourLabel(hour % 24)}
+                      {formatHourLabel(hour)}
                     </div>
                   ))}
                 </div>

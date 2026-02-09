@@ -80,6 +80,10 @@ export async function GET(request: NextRequest) {
   const cacheKey = `team-week::${startDate}::${endDate}`;
   const cachedFresh = getCached(cacheKey);
   const cachedAny = getCachedAny(cacheKey);
+  const members = getTeamMembers();
+  if (members.length === 0) {
+    return NextResponse.json({ error: "No members configured" }, { status: 400 });
+  }
 
   if (!forceRefresh && cachedFresh) {
     return NextResponse.json({ ...cachedFresh, stale: false, warning: null });
@@ -88,13 +92,24 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       ...cachedAny,
       stale: true,
-      warning: "Showing last cached 7-day snapshot. Click Refresh to fetch newer data.",
+      warning: "Showing last cached 7-day snapshot. Click Refresh view to fetch newer data.",
     });
   }
-
-  const members = getTeamMembers();
-  if (members.length === 0) {
-    return NextResponse.json({ error: "No members configured" }, { status: 400 });
+  if (!forceRefresh && !cachedAny) {
+    return NextResponse.json({
+      startDate,
+      endDate,
+      weekDates,
+      members: members.map((member) => ({
+        name: member.name,
+        totalSeconds: 0,
+        entryCount: 0,
+        days: weekDates.map((date) => ({ date, seconds: 0, entryCount: 0 })),
+      })),
+      cachedAt: new Date().toISOString(),
+      stale: true,
+      warning: "No cached 7-day snapshot yet. Click Refresh view to load data.",
+    });
   }
 
   try {

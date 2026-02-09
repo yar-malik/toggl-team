@@ -18,6 +18,9 @@ type CacheEntry = {
     current: (Awaited<ReturnType<typeof fetchCurrentEntry>> & { project_name?: string | null }) | null;
     totalSeconds: number;
     date: string;
+    cachedAt: string;
+    stale?: boolean;
+    warning?: string | null;
     quotaRemaining?: string | null;
     quotaResetsIn?: string | null;
   };
@@ -28,21 +31,29 @@ const responseCache = new Map<string, CacheEntry>();
 function getCached(key: string) {
   const cached = responseCache.get(key);
   if (!cached) return null;
-  if (Date.now() > cached.expiresAt) {
-    responseCache.delete(key);
-    return null;
-  }
+  if (Date.now() > cached.expiresAt) return null;
   return cached.payload;
+}
+
+function getCachedAny(key: string) {
+  return responseCache.get(key)?.payload ?? null;
 }
 
 function setCached(key: string, payload: CacheEntry["payload"]) {
   responseCache.set(key, { payload, expiresAt: Date.now() + CACHE_TTL_MS });
 }
 
+function nextUtcDate(dateInput: string): string {
+  const date = new Date(`${dateInput}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const member = searchParams.get("member");
   const dateParam = searchParams.get("date");
+  const forceRefresh = searchParams.get("refresh") === "1";
 
   if (!member) {
     return NextResponse.json({ error: "Missing member" }, { status: 400 });
@@ -58,20 +69,41 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Invalid date" }, { status: 400 });
   }
 
-  const startDate = `${dateInput}T00:00:00Z`;
-  const endDate = `${dateInput}T23:59:59Z`;
+  const nextDate = nextUtcDate(dateInput);
+  const startDate = `${dateInput}T08:00:00Z`;
+  const endDate = `${nextDate}T07:59:59Z`;
   const cacheKey = `${member.toLowerCase()}::${dateInput}`;
-  const isTodayUtc = dateInput === new Date().toISOString().slice(0, 10);
+  const nowMs = Date.now();
+  const isCurrentWindow = nowMs >= new Date(startDate).getTime() && nowMs <= new Date(endDate).getTime();
 
-  const cached = getCached(cacheKey);
-  if (cached) {
-    return NextResponse.json(cached);
+  const cachedFresh = getCached(cacheKey);
+  const cachedAny = getCachedAny(cacheKey);
+  if (!forceRefresh && cachedFresh) {
+    return NextResponse.json({ ...cachedFresh, stale: false, warning: null });
+  }
+  if (!forceRefresh && cachedAny) {
+    return NextResponse.json({
+      ...cachedAny,
+      stale: true,
+      warning: "Showing last cached snapshot. Click Refresh view to fetch newer data.",
+    });
+  }
+  if (!forceRefresh && !cachedAny) {
+    return NextResponse.json({
+      entries: [],
+      current: null,
+      totalSeconds: 0,
+      date: dateInput,
+      cachedAt: new Date().toISOString(),
+      stale: true,
+      warning: "No cached snapshot yet. Click Refresh view to load data.",
+    });
   }
 
   try {
     const [entries, current] = await Promise.all([
       fetchTimeEntries(token, startDate, endDate),
-      isTodayUtc ? fetchCurrentEntry(token) : Promise.resolve(null),
+      isCurrentWindow ? fetchCurrentEntry(token) : Promise.resolve(null),
     ]);
     const projectNames = await fetchProjectNames(token, current ? [...entries, current] : entries);
     const sortedEntries = sortEntriesByStart(entries).map((entry) => ({
@@ -93,9 +125,15 @@ export async function GET(request: NextRequest) {
       return acc + runningSeconds;
     }, 0);
 
-    const payload = { entries: sortedEntries, current: enrichedCurrent, totalSeconds, date: dateInput };
+    const payload = {
+      entries: sortedEntries,
+      current: enrichedCurrent,
+      totalSeconds,
+      date: dateInput,
+      cachedAt: new Date().toISOString(),
+    };
     setCached(cacheKey, payload);
-    return NextResponse.json(payload);
+    return NextResponse.json({ ...payload, stale: false, warning: null });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     const status = (error as Error & { status?: number }).status ?? 502;
@@ -104,6 +142,15 @@ export async function GET(request: NextRequest) {
     const quotaResetsIn = (error as Error & { quotaResetsIn?: string | null }).quotaResetsIn ?? null;
 
     if (status === 402) {
+      if (cachedAny) {
+        return NextResponse.json({
+          ...cachedAny,
+          stale: true,
+          warning: "Quota reached. Showing last cached snapshot. Try Refresh view after reset.",
+          quotaRemaining,
+          quotaResetsIn,
+        });
+      }
       return NextResponse.json(
         {
           error: "Toggl API quota reached. Please wait for reset before retrying.",
@@ -115,10 +162,27 @@ export async function GET(request: NextRequest) {
     }
 
     if (status === 429) {
+      if (cachedAny) {
+        return NextResponse.json({
+          ...cachedAny,
+          stale: true,
+          warning: "Rate limited. Showing last cached snapshot.",
+          quotaRemaining,
+          quotaResetsIn,
+        });
+      }
       return NextResponse.json(
         { error: "Rate limited by Toggl. Please retry shortly.", retryAfter, quotaRemaining, quotaResetsIn },
         { status: 429, headers: retryAfter ? { "Retry-After": retryAfter } : undefined }
       );
+    }
+
+    if (cachedAny) {
+      return NextResponse.json({
+        ...cachedAny,
+        stale: true,
+        warning: "Toggl is unavailable. Showing last cached snapshot.",
+      });
     }
 
     return NextResponse.json({ error: message }, { status: status >= 400 ? status : 502 });

@@ -46,6 +46,12 @@ function setCached(key: string, payload: CacheEntry["payload"]) {
   responseCache.set(key, { payload, expiresAt: Date.now() + CACHE_TTL_MS });
 }
 
+function nextUtcDate(dateInput: string): string {
+  const date = new Date(`${dateInput}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const dateParam = searchParams.get("date");
@@ -59,6 +65,10 @@ export async function GET(request: NextRequest) {
   const cacheKey = `team::${dateInput}`;
   const cachedFresh = getCached(cacheKey);
   const cachedAny = getCachedAny(cacheKey);
+  const members = getTeamMembers();
+  if (members.length === 0) {
+    return NextResponse.json({ error: "No members configured" }, { status: 400 });
+  }
   if (!forceRefresh && cachedFresh) {
     return NextResponse.json({ ...cachedFresh, stale: false, warning: null });
   }
@@ -66,17 +76,22 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       ...cachedAny,
       stale: true,
-      warning: "Showing last cached snapshot. Click Refresh to fetch newer data.",
+      warning: "Showing last cached snapshot. Click Refresh view to fetch newer data.",
+    });
+  }
+  if (!forceRefresh && !cachedAny) {
+    return NextResponse.json({
+      date: dateInput,
+      members: members.map((member) => ({ name: member.name, entries: [], current: null, totalSeconds: 0 })),
+      cachedAt: new Date().toISOString(),
+      stale: true,
+      warning: "No cached snapshot yet. Click Refresh view to load data.",
     });
   }
 
-  const members = getTeamMembers();
-  if (members.length === 0) {
-    return NextResponse.json({ error: "No members configured" }, { status: 400 });
-  }
-
-  const startDate = `${dateInput}T00:00:00Z`;
-  const endDate = `${dateInput}T23:59:59Z`;
+  const nextDate = nextUtcDate(dateInput);
+  const startDate = `${dateInput}T08:00:00Z`;
+  const endDate = `${nextDate}T07:59:59Z`;
 
   try {
     const results = await Promise.all(
