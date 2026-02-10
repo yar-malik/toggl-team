@@ -46,6 +46,19 @@ Notes:
 - If Supabase env vars are missing, the app falls back to in-memory cache.
 - Service role key is server-only and must never be exposed to the browser.
 - Cached snapshots are stored in `public.cache_snapshots`.
+- Historical sync data is also stored for analysis (see tables below).
+
+## Historical Data Stored
+
+When you click **Refresh view**, the app now persists historical records to Supabase:
+
+- `public.members`: known teammate identities.
+- `public.projects`: project metadata (`workspace_id`, `project_id`, project name).
+- `public.time_entries`: normalized Toggl entries (description, start/stop, duration, tags, raw payload).
+- `public.daily_member_stats`: per-day rollups per member (total seconds, entry count).
+- `public.sync_events`: ingestion/sync audit log (success/failure, scope, requested date).
+
+This gives you a solid base for historical charts and deeper analysis.
 
 ## Features
 

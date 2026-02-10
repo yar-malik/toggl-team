@@ -8,6 +8,7 @@ import {
   sortEntriesByStart,
 } from "@/lib/toggl";
 import { getCacheSnapshot, setCacheSnapshot } from "@/lib/cacheStore";
+import { persistHistoricalError, persistHistoricalSnapshot } from "@/lib/historyStore";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const CACHE_TTL_MS = 10 * 60 * 1000;
@@ -106,6 +107,7 @@ export async function GET(request: NextRequest) {
           return acc + runningSeconds;
         }, 0);
 
+        await persistHistoricalSnapshot("team", member.name, dateInput, sortedEntries);
         return { name: member.name, entries: sortedEntries, current: null, totalSeconds };
       })
     );
@@ -157,6 +159,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (cachedAny) {
+      await persistHistoricalError("team", null, dateInput, message);
       return NextResponse.json({
         ...cachedAny,
         stale: true,
@@ -164,6 +167,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    await persistHistoricalError("team", null, dateInput, message);
     return NextResponse.json({ error: message }, { status: status >= 400 ? status : 502 });
   }
 }

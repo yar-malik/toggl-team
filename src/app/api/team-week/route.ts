@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchTimeEntries, getTeamMembers, getTokenForMember } from "@/lib/toggl";
 import { getCacheSnapshot, setCacheSnapshot } from "@/lib/cacheStore";
+import { persistHistoricalError, persistWeeklyRollup } from "@/lib/historyStore";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const CACHE_TTL_MS = 30 * 60 * 1000;
@@ -160,8 +161,10 @@ export async function GET(request: NextRequest) {
       cachedAt: new Date().toISOString(),
     };
     await setCacheSnapshot(cacheKey, payload, CACHE_TTL_MS);
+    await persistWeeklyRollup(endDate, sorted);
     return NextResponse.json({ ...payload, stale: false, warning: null });
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
     const status = (error as Error & { status?: number }).status ?? 502;
     const quotaRemaining = (error as Error & { quotaRemaining?: string | null }).quotaRemaining ?? null;
     const quotaResetsIn = (error as Error & { quotaResetsIn?: string | null }).quotaResetsIn ?? null;
@@ -177,6 +180,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (cachedAny) {
+      await persistHistoricalError("team", null, endDate, message);
       return NextResponse.json({
         ...cachedAny,
         stale: true,
@@ -184,7 +188,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const message = error instanceof Error ? error.message : "Unknown error";
+    await persistHistoricalError("team", null, endDate, message);
     return NextResponse.json({ error: message }, { status: status >= 400 ? status : 502 });
   }
 }
