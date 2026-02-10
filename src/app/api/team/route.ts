@@ -7,6 +7,7 @@ import {
   getTokenForMember,
   sortEntriesByStart,
 } from "@/lib/toggl";
+import { getCacheSnapshot, setCacheSnapshot } from "@/lib/cacheStore";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const CACHE_TTL_MS = 10 * 60 * 1000;
@@ -19,32 +20,12 @@ type MemberPayload = {
 };
 
 type CacheEntry = {
-  expiresAt: number;
-  payload: {
-    date: string;
-    members: MemberPayload[];
-    cachedAt: string;
-    quotaRemaining?: string | null;
-    quotaResetsIn?: string | null;
-  };
+  date: string;
+  members: MemberPayload[];
+  cachedAt: string;
+  quotaRemaining?: string | null;
+  quotaResetsIn?: string | null;
 };
-
-const responseCache = new Map<string, CacheEntry>();
-
-function getCached(key: string) {
-  const cached = responseCache.get(key);
-  if (!cached) return null;
-  if (Date.now() > cached.expiresAt) return null;
-  return cached.payload;
-}
-
-function getCachedAny(key: string) {
-  return responseCache.get(key)?.payload ?? null;
-}
-
-function setCached(key: string, payload: CacheEntry["payload"]) {
-  responseCache.set(key, { payload, expiresAt: Date.now() + CACHE_TTL_MS });
-}
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -57,8 +38,8 @@ export async function GET(request: NextRequest) {
   }
 
   const cacheKey = `team::${dateInput}`;
-  const cachedFresh = getCached(cacheKey);
-  const cachedAny = getCachedAny(cacheKey);
+  const cachedFresh = await getCacheSnapshot<CacheEntry>(cacheKey, false);
+  const cachedAny = await getCacheSnapshot<CacheEntry>(cacheKey, true);
   const members = getTeamMembers();
   if (members.length === 0) {
     return NextResponse.json({ error: "No members configured" }, { status: 400 });
@@ -113,8 +94,8 @@ export async function GET(request: NextRequest) {
       })
     );
 
-    const payload = { date: dateInput, members: results, cachedAt: new Date().toISOString() };
-    setCached(cacheKey, payload);
+    const payload: CacheEntry = { date: dateInput, members: results, cachedAt: new Date().toISOString() };
+    await setCacheSnapshot(cacheKey, payload, CACHE_TTL_MS);
     return NextResponse.json({ ...payload, stale: false, warning: null });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";

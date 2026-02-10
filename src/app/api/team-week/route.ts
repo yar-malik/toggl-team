@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchTimeEntries, getTeamMembers, getTokenForMember } from "@/lib/toggl";
+import { getCacheSnapshot, setCacheSnapshot } from "@/lib/cacheStore";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const CACHE_TTL_MS = 30 * 60 * 1000;
@@ -18,34 +19,14 @@ type MemberWeekPayload = {
 };
 
 type CacheEntry = {
-  expiresAt: number;
-  payload: {
-    startDate: string;
-    endDate: string;
-    weekDates: string[];
-    members: MemberWeekPayload[];
-    cachedAt: string;
-    quotaRemaining?: string | null;
-    quotaResetsIn?: string | null;
-  };
+  startDate: string;
+  endDate: string;
+  weekDates: string[];
+  members: MemberWeekPayload[];
+  cachedAt: string;
+  quotaRemaining?: string | null;
+  quotaResetsIn?: string | null;
 };
-
-const responseCache = new Map<string, CacheEntry>();
-
-function getCached(key: string) {
-  const cached = responseCache.get(key);
-  if (!cached) return null;
-  if (Date.now() > cached.expiresAt) return null;
-  return cached.payload;
-}
-
-function getCachedAny(key: string) {
-  return responseCache.get(key)?.payload ?? null;
-}
-
-function setCached(key: string, payload: CacheEntry["payload"]) {
-  responseCache.set(key, { payload, expiresAt: Date.now() + CACHE_TTL_MS });
-}
 
 function getEntrySeconds(entry: Awaited<ReturnType<typeof fetchTimeEntries>>[number]) {
   if (entry.duration >= 0) return entry.duration;
@@ -78,8 +59,8 @@ export async function GET(request: NextRequest) {
   const weekDates = getLastSevenDates(endDate);
   const startDate = weekDates[0];
   const cacheKey = `team-week::${startDate}::${endDate}`;
-  const cachedFresh = getCached(cacheKey);
-  const cachedAny = getCachedAny(cacheKey);
+  const cachedFresh = await getCacheSnapshot<CacheEntry>(cacheKey, false);
+  const cachedAny = await getCacheSnapshot<CacheEntry>(cacheKey, true);
   const members = getTeamMembers();
   if (members.length === 0) {
     return NextResponse.json({ error: "No members configured" }, { status: 400 });
@@ -147,14 +128,14 @@ export async function GET(request: NextRequest) {
       return a.name.localeCompare(b.name);
     });
 
-    const payload = {
+    const payload: CacheEntry = {
       startDate,
       endDate,
       weekDates,
       members: sorted,
       cachedAt: new Date().toISOString(),
     };
-    setCached(cacheKey, payload);
+    await setCacheSnapshot(cacheKey, payload, CACHE_TTL_MS);
     return NextResponse.json({ ...payload, stale: false, warning: null });
   } catch (error) {
     const status = (error as Error & { status?: number }).status ?? 502;

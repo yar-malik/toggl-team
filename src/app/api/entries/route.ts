@@ -7,41 +7,22 @@ import {
   getTokenForMember,
   sortEntriesByStart,
 } from "@/lib/toggl";
+import { getCacheSnapshot, setCacheSnapshot } from "@/lib/cacheStore";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const CACHE_TTL_MS = 10 * 60 * 1000;
 
-type CacheEntry = {
-  expiresAt: number;
-  payload: {
-    entries: Array<Awaited<ReturnType<typeof fetchTimeEntries>>[number] & { project_name?: string | null }>;
-    current: (Awaited<ReturnType<typeof fetchCurrentEntry>> & { project_name?: string | null }) | null;
-    totalSeconds: number;
-    date: string;
-    cachedAt: string;
-    stale?: boolean;
-    warning?: string | null;
-    quotaRemaining?: string | null;
-    quotaResetsIn?: string | null;
-  };
+type EntriesPayload = {
+  entries: Array<Awaited<ReturnType<typeof fetchTimeEntries>>[number] & { project_name?: string | null }>;
+  current: (Awaited<ReturnType<typeof fetchCurrentEntry>> & { project_name?: string | null }) | null;
+  totalSeconds: number;
+  date: string;
+  cachedAt: string;
+  stale?: boolean;
+  warning?: string | null;
+  quotaRemaining?: string | null;
+  quotaResetsIn?: string | null;
 };
-
-const responseCache = new Map<string, CacheEntry>();
-
-function getCached(key: string) {
-  const cached = responseCache.get(key);
-  if (!cached) return null;
-  if (Date.now() > cached.expiresAt) return null;
-  return cached.payload;
-}
-
-function getCachedAny(key: string) {
-  return responseCache.get(key)?.payload ?? null;
-}
-
-function setCached(key: string, payload: CacheEntry["payload"]) {
-  responseCache.set(key, { payload, expiresAt: Date.now() + CACHE_TTL_MS });
-}
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -69,8 +50,8 @@ export async function GET(request: NextRequest) {
   const nowMs = Date.now();
   const isCurrentWindow = nowMs >= new Date(startDate).getTime() && nowMs <= new Date(endDate).getTime();
 
-  const cachedFresh = getCached(cacheKey);
-  const cachedAny = getCachedAny(cacheKey);
+  const cachedFresh = await getCacheSnapshot<EntriesPayload>(cacheKey, false);
+  const cachedAny = await getCacheSnapshot<EntriesPayload>(cacheKey, true);
   if (!forceRefresh && cachedFresh) {
     return NextResponse.json({ ...cachedFresh, stale: false, warning: null });
   }
@@ -118,14 +99,14 @@ export async function GET(request: NextRequest) {
       return acc + runningSeconds;
     }, 0);
 
-    const payload = {
+    const payload: EntriesPayload = {
       entries: sortedEntries,
       current: enrichedCurrent,
       totalSeconds,
       date: dateInput,
       cachedAt: new Date().toISOString(),
     };
-    setCached(cacheKey, payload);
+    await setCacheSnapshot(cacheKey, payload, CACHE_TTL_MS);
     return NextResponse.json({ ...payload, stale: false, warning: null });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";

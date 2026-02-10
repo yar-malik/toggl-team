@@ -27,6 +27,26 @@ TOGGL_TEAM='[
 
 Restart the dev server after editing `.env.local`.
 
+## Supabase Setup (Recommended)
+
+This app can persist cached snapshots in Supabase so cached data survives restarts and can be shared across users.
+
+1. Create a Supabase project.
+2. In Supabase SQL Editor, run `supabase/schema.sql`.
+3. Add these env vars to `.env.local` and your deployment platform:
+
+```bash
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+```
+
+4. Restart the app.
+
+Notes:
+- If Supabase env vars are missing, the app falls back to in-memory cache.
+- Service role key is server-only and must never be exposed to the browser.
+- Cached snapshots are stored in `public.cache_snapshots`.
+
 ## Features
 
 - Daily summary per task description.
