@@ -69,7 +69,7 @@ type SavedFilter = {
 const FILTERS_KEY = "toggl-team-filters";
 const LAST_KEY = "toggl-team-last";
 const HOURS_IN_DAY = 24;
-const HOUR_HEIGHT = 56;
+const HOUR_HEIGHT = 72;
 const MIN_BLOCK_HEIGHT = 24;
 const RANKING_ENTRY_CAP_SECONDS = 4 * 60 * 60;
 
@@ -164,6 +164,7 @@ type EntryModalData = {
 function buildTimelineBlocks(entries: TimeEntry[], dateInput: string) {
   const { start, end } = getDayBoundsMs(dateInput);
   const pxPerMs = HOUR_HEIGHT / (60 * 60 * 1000);
+  const minDurationMs = MIN_BLOCK_HEIGHT / pxPerMs;
   const sorted = [...entries].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
   const active: Array<{ lane: number; endMs: number }> = [];
   const blocks: TimelineBlock[] = [];
@@ -177,6 +178,7 @@ function buildTimelineBlocks(entries: TimeEntry[], dateInput: string) {
     const visibleStart = Math.max(startMs, start);
     const visibleEnd = Math.min(endMs, end);
     if (visibleEnd <= visibleStart) continue;
+    const displayEnd = Math.min(end, Math.max(visibleEnd, visibleStart + minDurationMs));
 
     for (let i = active.length - 1; i >= 0; i -= 1) {
       if (active[i].endMs <= visibleStart) {
@@ -188,14 +190,14 @@ function buildTimelineBlocks(entries: TimeEntry[], dateInput: string) {
     let lane = 0;
     while (usedLanes.has(lane)) lane += 1;
 
-    active.push({ lane, endMs: visibleEnd });
+    active.push({ lane, endMs: displayEnd });
     maxLanes = Math.max(maxLanes, lane + 1);
 
     blocks.push({
       id: `${entry.id}-${startMs}`,
       lane,
       topPx: (visibleStart - start) * pxPerMs,
-      heightPx: Math.max(MIN_BLOCK_HEIGHT, (visibleEnd - visibleStart) * pxPerMs),
+      heightPx: (displayEnd - visibleStart) * pxPerMs,
       title: entry.description?.trim() || "(No description)",
       project: entry.project_name?.trim() || "No project",
       timeRange: `${formatTime(entry.start)} → ${formatTime(entry.stop)}`,
@@ -389,14 +391,14 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
     setQuotaRemaining(null);
     setQuotaResetsIn(null);
 
-    const params = new URLSearchParams({ date });
+    const params = new URLSearchParams({ date, tzOffset: String(new Date().getTimezoneOffset()) });
     if (forceRefreshRef.current) {
       params.set("refresh", "1");
     }
     const url =
       mode === "team" || mode === "all"
         ? `/api/team?${params.toString()}`
-        : `/api/entries?${new URLSearchParams({ member, date }).toString()}`;
+        : `/api/entries?${new URLSearchParams({ member, date, tzOffset: String(new Date().getTimezoneOffset()) }).toString()}`;
 
     fetch(url)
       .then(async (res) => {
@@ -451,7 +453,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
     if (!(mode === "team" || mode === "all")) return;
     let active = true;
 
-    const params = new URLSearchParams({ date });
+    const params = new URLSearchParams({ date, tzOffset: String(new Date().getTimezoneOffset()) });
     if (forceRefreshRef.current) {
       params.set("refresh", "1");
     }

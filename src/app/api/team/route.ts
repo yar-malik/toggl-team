@@ -27,10 +27,27 @@ type CacheEntry = {
   quotaResetsIn?: string | null;
 };
 
+function parseTzOffsetMinutes(value: string | null): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(-720, Math.min(840, Math.trunc(parsed)));
+}
+
+function buildUtcDayRange(dateInput: string, tzOffsetMinutes: number) {
+  const [yearStr, monthStr, dayStr] = dateInput.split("-");
+  const year = Number(yearStr);
+  const month = Number(monthStr) - 1;
+  const day = Number(dayStr);
+  const startMs = Date.UTC(year, month, day, 0, 0, 0, 0) + tzOffsetMinutes * 60 * 1000;
+  const endMs = Date.UTC(year, month, day, 23, 59, 59, 999) + tzOffsetMinutes * 60 * 1000;
+  return { startDate: new Date(startMs).toISOString(), endDate: new Date(endMs).toISOString() };
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const dateParam = searchParams.get("date");
   const forceRefresh = searchParams.get("refresh") === "1";
+  const tzOffsetMinutes = parseTzOffsetMinutes(searchParams.get("tzOffset"));
 
   const dateInput = dateParam ?? new Date().toISOString().slice(0, 10);
   if (!DATE_RE.test(dateInput)) {
@@ -64,8 +81,7 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const startDate = `${dateInput}T00:00:00Z`;
-  const endDate = `${dateInput}T23:59:59Z`;
+  const { startDate, endDate } = buildUtcDayRange(dateInput, tzOffsetMinutes);
 
   try {
     const results = await Promise.all(

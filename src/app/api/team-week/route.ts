@@ -46,10 +46,32 @@ function getLastSevenDates(endDate: string) {
   return dates;
 }
 
+function parseTzOffsetMinutes(value: string | null): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(-720, Math.min(840, Math.trunc(parsed)));
+}
+
+function getDateKeyAtOffset(iso: string, tzOffsetMinutes: number) {
+  const utcMs = new Date(iso).getTime();
+  if (Number.isNaN(utcMs)) return null;
+  const shifted = new Date(utcMs - tzOffsetMinutes * 60 * 1000);
+  return shifted.toISOString().slice(0, 10);
+}
+
+function buildUtcRangeFromLocalDates(startDate: string, endDate: string, tzOffsetMinutes: number) {
+  const [sy, sm, sd] = startDate.split("-").map(Number);
+  const [ey, em, ed] = endDate.split("-").map(Number);
+  const startMs = Date.UTC(sy, sm - 1, sd, 0, 0, 0, 0) + tzOffsetMinutes * 60 * 1000;
+  const endMs = Date.UTC(ey, em - 1, ed, 23, 59, 59, 999) + tzOffsetMinutes * 60 * 1000;
+  return { startIso: new Date(startMs).toISOString(), endIso: new Date(endMs).toISOString() };
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const dateParam = searchParams.get("date");
   const forceRefresh = searchParams.get("refresh") === "1";
+  const tzOffsetMinutes = parseTzOffsetMinutes(searchParams.get("tzOffset"));
 
   const endDate = dateParam ?? new Date().toISOString().slice(0, 10);
   if (!DATE_RE.test(endDate)) {
@@ -102,13 +124,15 @@ export async function GET(request: NextRequest) {
           return { name: member.name, totalSeconds: 0, entryCount: 0, days: emptyDays };
         }
 
-        const entries = await fetchTimeEntries(token, `${startDate}T00:00:00Z`, `${endDate}T23:59:59Z`);
+        const range = buildUtcRangeFromLocalDates(startDate, endDate, tzOffsetMinutes);
+        const entries = await fetchTimeEntries(token, range.startIso, range.endIso);
         const dayMap = new Map<string, DaySummary>(
           weekDates.map((date) => [date, { date, seconds: 0, entryCount: 0 }])
         );
 
         for (const entry of entries) {
-          const day = entry.start.slice(0, 10);
+          const day = getDateKeyAtOffset(entry.start, tzOffsetMinutes);
+          if (!day) continue;
           const bucket = dayMap.get(day);
           if (!bucket) continue;
           bucket.seconds += getEntrySeconds(entry);
