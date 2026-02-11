@@ -345,15 +345,21 @@ function formatAgoFromMs(timestampMs: number): string {
   return `${hours}h ${minutes}m ago`;
 }
 
-function getEntryCardDetails(entry: TimeEntry, memberName: string) {
-  return {
+function getEntryTooltipText(entry: TimeEntry, memberName: string) {
+  const description = entry.description?.trim() || "(No description)";
+  const project = entry.project_name?.trim() || "No project";
+  const start = formatDateTime(entry.start);
+  const end = entry.stop ? formatDateTime(entry.stop) : "Running";
+  const duration = formatDuration(getEntrySeconds(entry));
+  return [
     memberName,
-    description: entry.description?.trim() || "(No description)",
-    project: entry.project_name?.trim() || "No project",
-    start: formatDateTime(entry.start),
-    end: entry.stop ? formatDateTime(entry.stop) : "Running",
-    duration: formatDuration(getEntrySeconds(entry)),
-  };
+    "",
+    `Description: ${description}`,
+    `Project: ${project}`,
+    `Start: ${start}`,
+    `End: ${end}`,
+    `Duration: ${duration}`,
+  ].join("\n");
 }
 
 export default function TimeDashboard({ members }: { members: Member[] }) {
@@ -853,18 +859,18 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                       {timeline.blocks.map((block) => {
                         const sourceEntry = data.entries.find((entry) => `${entry.id}-${new Date(entry.start).getTime()}` === block.id);
                         const colorClass = getProjectColorClass(block.project);
-                        const details = sourceEntry ? getEntryCardDetails(sourceEntry, member) : null;
                         return (
                         <button
                           key={block.id}
                           type="button"
-                          className={`group absolute rounded-lg border px-2 py-1 text-left shadow-sm ${colorClass}`}
+                          className={`absolute overflow-hidden rounded-lg border px-2 py-1 text-left shadow-sm ${colorClass}`}
                           style={{
                             top: `${block.topPx}px`,
                             height: `${block.heightPx}px`,
                             left: `calc(${(block.lane / timeline.maxLanes) * 100}% + 0.25rem)`,
                             width: `calc(${100 / timeline.maxLanes}% - 0.5rem)`,
                           }}
+                          title={sourceEntry ? getEntryTooltipText(sourceEntry, member) : undefined}
                           onClick={() => {
                             if (!sourceEntry) return;
                             openEntryModal(sourceEntry, member);
@@ -876,26 +882,6 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                             <p className="truncate text-[11px] text-slate-600">{block.timeRange}</p>
                             <p className="truncate text-[11px] text-slate-600">{block.durationLabel}</p>
                           </div>
-                          {details && (
-                            <div className="pointer-events-none absolute left-full top-0 z-20 ml-2 hidden w-64 rounded-lg border border-slate-200 bg-white p-3 text-left shadow-lg group-hover:block group-focus-visible:block">
-                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{details.memberName}</p>
-                              <p className="mt-1 text-sm text-slate-700">
-                                <span className="font-semibold text-slate-900">Description:</span> {details.description}
-                              </p>
-                              <p className="text-sm text-slate-700">
-                                <span className="font-semibold text-slate-900">Project:</span> {details.project}
-                              </p>
-                              <p className="text-sm text-slate-700">
-                                <span className="font-semibold text-slate-900">Start:</span> {details.start}
-                              </p>
-                              <p className="text-sm text-slate-700">
-                                <span className="font-semibold text-slate-900">End:</span> {details.end}
-                              </p>
-                              <p className="text-sm text-slate-700">
-                                <span className="font-semibold text-slate-900">Duration:</span> {details.duration}
-                              </p>
-                            </div>
-                          )}
                         </button>
                       );
                       })}
@@ -1201,18 +1187,18 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                               (entry) => `${entry.id}-${new Date(entry.start).getTime()}` === block.id
                             );
                           const colorClass = getProjectColorClass(block.project);
-                          const details = sourceEntry ? getEntryCardDetails(sourceEntry, memberTimeline.name) : null;
                           return (
                             <button
                               key={block.id}
                               type="button"
-                              className={`group absolute rounded-lg border px-2 py-1 text-left shadow-sm ${colorClass}`}
+                              className={`absolute overflow-hidden rounded-lg border px-2 py-1 text-left shadow-sm ${colorClass}`}
                               style={{
                                 top: `${block.topPx}px`,
                                 height: `${block.heightPx}px`,
                                 left: `calc(${(block.lane / memberTimeline.maxLanes) * 100}% + 0.25rem)`,
                                 width: `calc(${100 / memberTimeline.maxLanes}% - 0.5rem)`,
                               }}
+                              title={sourceEntry ? getEntryTooltipText(sourceEntry, memberTimeline.name) : undefined}
                               onClick={() => {
                                 if (!sourceEntry) return;
                                 openEntryModal(sourceEntry, memberTimeline.name);
@@ -1223,26 +1209,6 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                                 <p className="truncate text-[11px] text-slate-700">Project: {block.project}</p>
                                 <p className="truncate text-[11px] text-slate-700">{block.timeRange}</p>
                               </div>
-                              {details && (
-                                <div className="pointer-events-none absolute left-full top-0 z-20 ml-2 hidden w-64 rounded-lg border border-slate-200 bg-white p-3 text-left shadow-lg group-hover:block group-focus-visible:block">
-                                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{details.memberName}</p>
-                                  <p className="mt-1 text-sm text-slate-700">
-                                    <span className="font-semibold text-slate-900">Description:</span> {details.description}
-                                  </p>
-                                  <p className="text-sm text-slate-700">
-                                    <span className="font-semibold text-slate-900">Project:</span> {details.project}
-                                  </p>
-                                  <p className="text-sm text-slate-700">
-                                    <span className="font-semibold text-slate-900">Start:</span> {details.start}
-                                  </p>
-                                  <p className="text-sm text-slate-700">
-                                    <span className="font-semibold text-slate-900">End:</span> {details.end}
-                                  </p>
-                                  <p className="text-sm text-slate-700">
-                                    <span className="font-semibold text-slate-900">Duration:</span> {details.duration}
-                                  </p>
-                                </div>
-                              )}
                             </button>
                           );
                         })}
