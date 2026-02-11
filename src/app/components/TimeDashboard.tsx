@@ -72,6 +72,7 @@ const HOURS_IN_DAY = 24;
 const HOUR_HEIGHT = 72;
 const MIN_BLOCK_HEIGHT = 24;
 const RANKING_ENTRY_CAP_SECONDS = 4 * 60 * 60;
+const EXCLUDED_PROJECT_NAME = "non-work-task";
 
 function formatDuration(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
@@ -152,6 +153,12 @@ type TeamRankingRow = {
   longestBreakSeconds: number;
 };
 
+type OneDayOverviewRow = {
+  name: string;
+  totalSeconds: number;
+  entryCount: number;
+};
+
 type EntryModalData = {
   memberName: string;
   description: string;
@@ -213,9 +220,14 @@ function getClosedEntryRange(entry: TimeEntry): { startMs: number; endMs: number
   return { startMs, endMs, seconds: Math.max(0, seconds) };
 }
 
+function isExcludedFromRanking(projectName: string | null | undefined) {
+  return (projectName ?? "").trim().toLowerCase() === EXCLUDED_PROJECT_NAME;
+}
+
 function buildTeamRanking(members: TeamMemberData[]): TeamRankingRow[] {
   const rows = members.map((member) => {
     const closedRanges = member.entries
+      .filter((entry) => !isExcludedFromRanking(entry.project_name))
       .map(getClosedEntryRange)
       .filter((item): item is NonNullable<typeof item> => item !== null)
       .sort((a, b) => a.startMs - b.startMs);
@@ -243,6 +255,23 @@ function buildTeamRanking(members: TeamMemberData[]): TeamRankingRow[] {
 
   return rows.sort((a, b) => {
     if (b.rankedSeconds !== a.rankedSeconds) return b.rankedSeconds - a.rankedSeconds;
+    if (b.entryCount !== a.entryCount) return b.entryCount - a.entryCount;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+function buildOneDayOverviewRows(members: TeamMemberData[]): OneDayOverviewRow[] {
+  const rows = members.map((member) => {
+    const filtered = member.entries.filter((entry) => !isExcludedFromRanking(entry.project_name));
+    const totalSeconds = filtered.reduce((acc, entry) => acc + getEntrySeconds(entry), 0);
+    return {
+      name: member.name,
+      totalSeconds,
+      entryCount: filtered.length,
+    };
+  });
+  return rows.sort((a, b) => {
+    if (b.totalSeconds !== a.totalSeconds) return b.totalSeconds - a.totalSeconds;
     if (b.entryCount !== a.entryCount) return b.entryCount - a.entryCount;
     return a.name.localeCompare(b.name);
   });
@@ -325,7 +354,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
   const [retryAfter, setRetryAfter] = useState<string | null>(null);
   const [quotaRemaining, setQuotaRemaining] = useState<string | null>(null);
   const [quotaResetsIn, setQuotaResetsIn] = useState<string | null>(null);
-  const [mode, setMode] = useState<"member" | "team" | "all">("member");
+  const [mode, setMode] = useState<"member" | "team" | "all">("all");
   const [selectedEntry, setSelectedEntry] = useState<EntryModalData | null>(null);
   const [manualRefreshTick, setManualRefreshTick] = useState(0);
   const forceRefreshRef = useRef(false);
@@ -356,7 +385,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
           setDate(parsed.date);
         }
         if (parsed.mode) {
-          setMode(parsed.mode);
+          setMode(parsed.mode === "member" ? "all" : parsed.mode);
         }
       } catch {
         // ignore
@@ -497,6 +526,11 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
     return buildTeamRanking(teamData.members);
   }, [teamData]);
 
+  const oneDayOverview = useMemo(() => {
+    if (!teamData) return [] as OneDayOverviewRow[];
+    return buildOneDayOverviewRows(teamData.members);
+  }, [teamData]);
+
   const teamTimeline = useMemo(() => {
     if (!teamData) return [] as Array<{ name: string; blocks: TimelineBlock[]; maxLanes: number }>;
     return teamData.members.map((memberData) => ({
@@ -556,7 +590,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
   const handleApplyFilter = (filter: SavedFilter) => {
     setMember(filter.member);
     setDate(filter.date);
-    setMode("member");
+    setMode("all");
   };
 
   if (!hasMembers) {
@@ -592,15 +626,6 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
             onClick={() => setMode("team")}
           >
             Team overview
-          </button>
-          <button
-            type="button"
-            className={`rounded-full px-4 py-2 text-sm font-semibold ${
-              mode === "member" ? "bg-slate-900 text-white" : "bg-white text-slate-600 border border-slate-200"
-            }`}
-            onClick={() => setMode("member")}
-          >
-            Member view
           </button>
         </div>
         <button
@@ -862,6 +887,85 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
 
       {!loading && !error && (mode === "team" || mode === "all") && teamData && (
         <div className="space-y-4">
+          {mode === "all" && (
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="text-lg font-semibold text-slate-900">1 Day overview</h2>
+              <p className="text-sm text-slate-500">
+                Daily leaderboard (excludes project: Non-Work-Task).
+              </p>
+              <div className="mt-4 overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-left text-slate-500">
+                      <th className="px-2 py-2 font-semibold">Rank</th>
+                      <th className="px-2 py-2 font-semibold">Member</th>
+                      <th className="px-2 py-2 font-semibold">Total</th>
+                      <th className="px-2 py-2 font-semibold">Entries</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {oneDayOverview.map((row, index) => (
+                      <tr key={row.name} className="border-b border-slate-100">
+                        <td className="px-2 py-2 font-semibold text-slate-900">{index + 1}</td>
+                        <td className="px-2 py-2 text-slate-800">{row.name}</td>
+                        <td className="px-2 py-2 text-slate-800">{formatDuration(row.totalSeconds)}</td>
+                        <td className="px-2 py-2 text-slate-800">{row.entryCount}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {mode === "all" && (
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-900">Team ranking</h2>
+                  <p className="text-sm text-slate-500">
+                    Ranking uses closed entries only and excludes project: Non-Work-Task.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4 overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-left text-slate-500">
+                      <th className="px-2 py-2 font-semibold">Rank</th>
+                      <th className="px-2 py-2 font-semibold">Member</th>
+                      <th className="px-2 py-2 font-semibold">Ranked hours</th>
+                      <th className="px-2 py-2 font-semibold">Entries</th>
+                      <th className="px-2 py-2 font-semibold">Started</th>
+                      <th className="px-2 py-2 font-semibold">Ended</th>
+                      <th className="px-2 py-2 font-semibold">Longest break</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {teamRanking.length === 0 && (
+                      <tr>
+                        <td className="px-2 py-3 text-slate-500" colSpan={7}>
+                          No entries yet.
+                        </td>
+                      </tr>
+                    )}
+                    {teamRanking.map((row, index) => (
+                      <tr key={row.name} className="border-b border-slate-100">
+                        <td className="px-2 py-2 font-semibold text-slate-900">{index + 1}</td>
+                        <td className="px-2 py-2 text-slate-800">{row.name}</td>
+                        <td className="px-2 py-2 text-slate-800">{formatDuration(row.rankedSeconds)}</td>
+                        <td className="px-2 py-2 text-slate-800">{row.entryCount}</td>
+                        <td className="px-2 py-2 text-slate-700">{formatTime(row.firstStart)}</td>
+                        <td className="px-2 py-2 text-slate-700">{formatTime(row.lastEnd)}</td>
+                        <td className="px-2 py-2 text-slate-700">{formatDuration(row.longestBreakSeconds)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {teamWeekData && (
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="text-lg font-semibold text-slate-900">Last 7 days overview</h2>
@@ -922,58 +1026,9 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
             </div>
           )}
 
-          {mode === "team" && (
+          {mode === "all" && (
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-semibold text-slate-900">Team ranking</h2>
-                  <p className="text-sm text-slate-500">
-                    Ranking uses closed entries only. Each entry is capped at 4h, so nonstop timers do not dominate.
-                  </p>
-                </div>
-              </div>
-              <div className="mt-4 overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-200 text-left text-slate-500">
-                      <th className="px-2 py-2 font-semibold">Rank</th>
-                      <th className="px-2 py-2 font-semibold">Member</th>
-                      <th className="px-2 py-2 font-semibold">Ranked hours</th>
-                      <th className="px-2 py-2 font-semibold">Entries</th>
-                      <th className="px-2 py-2 font-semibold">Started</th>
-                      <th className="px-2 py-2 font-semibold">Ended</th>
-                      <th className="px-2 py-2 font-semibold">Longest break</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {teamRanking.length === 0 && (
-                      <tr>
-                        <td className="px-2 py-3 text-slate-500" colSpan={7}>
-                          No entries yet.
-                        </td>
-                      </tr>
-                    )}
-                    {teamRanking.map((row, index) => (
-                      <tr key={row.name} className="border-b border-slate-100">
-                        <td className="px-2 py-2 font-semibold text-slate-900">{index + 1}</td>
-                        <td className="px-2 py-2 text-slate-800">{row.name}</td>
-                        <td className="px-2 py-2 text-slate-800">{formatDuration(row.rankedSeconds)}</td>
-                        <td className="px-2 py-2 text-slate-800">{row.entryCount}</td>
-                        <td className="px-2 py-2 text-slate-700">{formatTime(row.firstStart)}</td>
-                        <td className="px-2 py-2 text-slate-700">{formatTime(row.lastEnd)}</td>
-                        <td className="px-2 py-2 text-slate-700">{formatDuration(row.longestBreakSeconds)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-semibold text-slate-900">
-              {mode === "all" ? "All team calendars" : "Team day calendar"}
-            </h2>
+            <h2 className="text-lg font-semibold text-slate-900">All team calendars</h2>
             <p className="text-sm text-slate-500">
               One shared daily timeline for everyone. Matching vertical positions indicate overlap.
             </p>
@@ -1046,6 +1101,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
               </div>
             </div>
           </div>
+          )}
 
           {mode === "team" && (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">

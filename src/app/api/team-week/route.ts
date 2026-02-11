@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchTimeEntries, getTeamMembers, getTokenForMember } from "@/lib/toggl";
+import {
+  fetchProjectNames,
+  fetchTimeEntries,
+  getEntryProjectName,
+  getTeamMembers,
+  getTokenForMember,
+} from "@/lib/toggl";
 import { getCacheSnapshot, setCacheSnapshot } from "@/lib/cacheStore";
 import { persistHistoricalError, persistWeeklyRollup } from "@/lib/historyStore";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const CACHE_TTL_MS = 30 * 60 * 1000;
+const EXCLUDED_PROJECT_NAME = "non-work-task";
 
 type DaySummary = {
   date: string;
@@ -127,11 +134,14 @@ export async function GET(request: NextRequest) {
 
         const range = buildUtcRangeFromLocalDates(startDate, endDate, tzOffsetMinutes);
         const entries = await fetchTimeEntries(token, range.startIso, range.endIso);
+        const projectNames = await fetchProjectNames(token, entries);
         const dayMap = new Map<string, DaySummary>(
           weekDates.map((date) => [date, { date, seconds: 0, entryCount: 0 }])
         );
 
         for (const entry of entries) {
+          const projectName = getEntryProjectName(entry, projectNames);
+          if ((projectName ?? "").trim().toLowerCase() === EXCLUDED_PROJECT_NAME) continue;
           const day = getDateKeyAtOffset(entry.start, tzOffsetMinutes);
           if (!day) continue;
           const bucket = dayMap.get(day);
