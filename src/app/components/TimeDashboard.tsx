@@ -1104,13 +1104,20 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                           <h3 className="text-base font-semibold text-slate-900">{memberData.name}</h3>
                           <p className="text-sm text-slate-500">Total {formatDuration(cardTotalSeconds)}</p>
                         </div>
-                        <span
-                          className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                            running ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
-                          }`}
-                        >
-                          {running ? "Running" : "Idle"}
-                        </span>
+                        <div className="flex flex-col items-end gap-1">
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                              running ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
+                            }`}
+                          >
+                            {running ? "Running" : "Idle"}
+                          </span>
+                          {!running && (
+                            <span className="rounded-md bg-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                              Idle since {formatAgoFromMs(lastActivityMs)}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <div className="mt-2 space-y-1">
                         {running ? (
@@ -1119,13 +1126,6 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                           </p>
                         ) : (
                           <p className="text-xs text-slate-500">Now: no active timer</p>
-                        )}
-                        {!running && (
-                          <p className="text-xs text-slate-600">
-                            <span className="rounded-md bg-slate-200 px-2 py-0.5 font-semibold text-slate-700">
-                              Idle since {formatAgoFromMs(lastActivityMs)}
-                            </span>
-                          </p>
                         )}
                       </div>
                       <div className="mt-3 space-y-2">
