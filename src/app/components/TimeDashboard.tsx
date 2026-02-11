@@ -374,7 +374,9 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
   const [mode, setMode] = useState<"member" | "team" | "all">("all");
   const [selectedEntry, setSelectedEntry] = useState<EntryModalData | null>(null);
   const [manualRefreshTick, setManualRefreshTick] = useState(0);
+  const [lastUpdateMeta, setLastUpdateMeta] = useState<{ at: string; source: "auto" | "manual" | "cached" } | null>(null);
   const forceRefreshRef = useRef(false);
+  const refreshSourceRef = useRef<"auto" | "manual" | "cached">("cached");
 
   const hasMembers = members.length > 0;
 
@@ -417,10 +419,11 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
   }, [member, date, mode]);
 
   useEffect(() => {
-    if (!forceRefreshRef.current) return;
     if (!member && mode === "member") return;
 
     let active = true;
+    const shouldForceRefresh = forceRefreshRef.current;
+    const refreshSource = shouldForceRefresh ? refreshSourceRef.current : "cached";
     setLoading(true);
     setError(null);
     setRetryAfter(null);
@@ -428,13 +431,18 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
     setQuotaResetsIn(null);
 
     const params = new URLSearchParams({ date, tzOffset: String(new Date().getTimezoneOffset()) });
-    if (forceRefreshRef.current) {
+    if (shouldForceRefresh) {
       params.set("refresh", "1");
     }
     const url =
       mode === "team" || mode === "all"
         ? `/api/team?${params.toString()}`
-        : `/api/entries?${new URLSearchParams({ member, date, tzOffset: String(new Date().getTimezoneOffset()) }).toString()}`;
+        : `/api/entries?${new URLSearchParams({
+            member,
+            date,
+            tzOffset: String(new Date().getTimezoneOffset()),
+            ...(shouldForceRefresh ? { refresh: "1" } : {}),
+          }).toString()}`;
 
     fetch(url)
       .then(async (res) => {
@@ -459,9 +467,17 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
         if (mode === "team" || mode === "all") {
           setTeamData(payload as TeamResponse);
           setData(null);
+          const payloadCachedAt = (payload as TeamResponse).cachedAt;
+          if (payloadCachedAt) {
+            setLastUpdateMeta({ at: payloadCachedAt, source: refreshSource });
+          }
         } else {
           setData(payload as EntriesResponse);
           setTeamData(null);
+          const payloadCachedAt = (payload as EntriesResponse).cachedAt;
+          if (payloadCachedAt) {
+            setLastUpdateMeta({ at: payloadCachedAt, source: refreshSource });
+          }
         }
       })
       .catch((err: Error & { retryAfter?: string | null; quotaRemaining?: string | null; quotaResetsIn?: string | null }) => {
@@ -470,12 +486,11 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
         setRetryAfter(err.retryAfter ?? null);
         setQuotaRemaining(err.quotaRemaining ?? null);
         setQuotaResetsIn(err.quotaResetsIn ?? null);
-        setData(null);
-        setTeamData(null);
       })
       .finally(() => {
         if (!active) return;
         forceRefreshRef.current = false;
+        refreshSourceRef.current = "cached";
         setLoading(false);
       });
 
@@ -485,12 +500,12 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
   }, [member, date, mode, manualRefreshTick]);
 
   useEffect(() => {
-    if (!forceRefreshRef.current) return;
     if (!(mode === "team" || mode === "all")) return;
     let active = true;
+    const shouldForceRefresh = forceRefreshRef.current;
 
     const params = new URLSearchParams({ date, tzOffset: String(new Date().getTimezoneOffset()) });
-    if (forceRefreshRef.current) {
+    if (shouldForceRefresh) {
       params.set("refresh", "1");
     }
 
@@ -515,6 +530,17 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
       active = false;
     };
   }, [mode, date, manualRefreshTick]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === "hidden") return;
+      refreshSourceRef.current = "auto";
+      forceRefreshRef.current = true;
+      setManualRefreshTick((value) => value + 1);
+    }, 30 * 60 * 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   const runningEntry = useMemo(() => {
     if (!data?.current) return null;
@@ -563,6 +589,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
   };
 
   const handleManualRefresh = () => {
+    refreshSourceRef.current = "manual";
     forceRefreshRef.current = true;
     setManualRefreshTick((value) => value + 1);
   };
@@ -644,14 +671,22 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
             Team overview
           </button>
         </div>
-        <button
-          type="button"
-          className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-sky-300"
-          onClick={handleManualRefresh}
-          disabled={loading}
-        >
-          {loading ? "Refreshing..." : "Refresh view"}
-        </button>
+        <div className="flex flex-col items-end gap-1">
+          <button
+            type="button"
+            className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-sky-300"
+            onClick={handleManualRefresh}
+            disabled={loading}
+          >
+            {loading ? "Refreshing..." : "Refresh now"}
+          </button>
+          <p className="text-xs text-slate-500">
+            Last updated:{" "}
+            {lastUpdateMeta
+              ? `${formatDateTime(lastUpdateMeta.at)} (${lastUpdateMeta.source === "manual" ? "Refresh now" : lastUpdateMeta.source === "auto" ? "automatic refresh" : "cached load"})`
+              : "—"}
+          </p>
+        </div>
       </div>
 
       <div className="grid gap-4 rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-sky-50/40 p-6 shadow-sm md:grid-cols-4">
