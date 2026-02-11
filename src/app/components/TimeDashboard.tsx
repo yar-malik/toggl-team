@@ -861,7 +861,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
 
       {!loading && !error && (mode === "team" || mode === "all") && teamData && (
         <div className="space-y-4">
-          {mode === "all" && (
+          {mode === "team" && (
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -875,31 +875,34 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                 <p className="mt-4 text-sm text-slate-500">No entries yet.</p>
               )}
               {teamRanking.length > 0 && (
-                <div className="mt-4 space-y-3">
-                  {teamRanking.map((row, index) => {
-                    const topScore = teamRanking[0]?.rankedSeconds ?? 0;
-                    const barWidth = topScore > 0 ? Math.max(8, Math.round((row.rankedSeconds / topScore) * 100)) : 8;
-                    return (
-                      <div key={row.name} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <p className="text-sm font-semibold text-slate-900">
-                            #{index + 1} {row.name}
-                          </p>
-                          <p className="text-sm font-semibold text-slate-800">{formatDuration(row.rankedSeconds)}</p>
-                        </div>
-                        <div className="mt-2 h-1.5 w-full rounded-full bg-slate-200">
-                          <div
-                            className="h-full rounded-full bg-gradient-to-r from-sky-500 to-cyan-400"
-                            style={{ width: `${barWidth}%` }}
-                            title={`${row.name}: ${formatDuration(row.rankedSeconds)}`}
-                          />
-                        </div>
-                        <p className="mt-2 text-xs text-slate-600">
-                          Start {formatTime(row.firstStart)} | End {formatTime(row.lastEnd)} | Longest break {formatDuration(row.longestBreakSeconds)} | {row.entryCount} entries
+                <div className="mt-4 overflow-x-auto">
+                  <div className="min-w-[760px]">
+                    <div className="flex h-56 items-end gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      {teamRanking.map((row, index) => {
+                        const topScore = teamRanking[0]?.rankedSeconds ?? 0;
+                        const barHeight = topScore > 0 ? Math.max(16, Math.round((row.rankedSeconds / topScore) * 140)) : 16;
+                        return (
+                          <div key={row.name} className="flex w-[90px] flex-col items-center gap-2">
+                            <p className="text-[11px] font-semibold text-slate-800">#{index + 1}</p>
+                            <div
+                              className="w-6 rounded-t-md bg-gradient-to-t from-sky-600 to-cyan-400"
+                              style={{ height: `${barHeight}px` }}
+                              title={`${row.name}: ${formatDuration(row.rankedSeconds)}`}
+                            />
+                            <p className="truncate text-center text-xs font-semibold text-slate-900">{row.name}</p>
+                            <p className="text-center text-[11px] text-slate-600">{formatDuration(row.rankedSeconds)}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-3 grid gap-2 md:grid-cols-2">
+                      {teamRanking.map((row) => (
+                        <p key={`${row.name}-meta`} className="text-xs text-slate-600">
+                          <span className="font-semibold text-slate-800">{row.name}</span>: Start {formatTime(row.firstStart)} | End {formatTime(row.lastEnd)} | Longest break {formatDuration(row.longestBreakSeconds)} | {row.entryCount} entries
                         </p>
-                      </div>
-                    );
-                  })}
+                      ))}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -969,7 +972,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
             </div>
           )}
 
-          {teamWeekData && (
+          {mode === "team" && teamWeekData && (
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="text-lg font-semibold text-slate-900">Last 7 days overview</h2>
               <p className="text-sm text-slate-500">
