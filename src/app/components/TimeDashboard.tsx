@@ -153,6 +153,12 @@ type TeamRankingRow = {
   longestBreakSeconds: number;
 };
 
+type TaskProjectSummaryRow = {
+  label: string;
+  project: string;
+  seconds: number;
+};
+
 
 type EntryModalData = {
   memberName: string;
@@ -319,7 +325,7 @@ function buildSummary(entries: TimeEntry[]) {
 }
 
 function buildTaskProjectSummary(entries: TimeEntry[]) {
-  const totals = new Map<string, { label: string; project: string; seconds: number }>();
+  const totals = new Map<string, TaskProjectSummaryRow>();
   entries.forEach((entry) => {
     const label = entry.description?.trim() || "(No description)";
     const project = entry.project_name?.trim() || "No project";
@@ -359,6 +365,14 @@ function getEntryTooltipText(entry: TimeEntry, memberName: string) {
     `Start: ${start}`,
     `End: ${end}`,
     `Duration: ${duration}`,
+  ].join("\n");
+}
+
+function getTaskSummaryTooltip(item: TaskProjectSummaryRow) {
+  return [
+    `Project: ${item.project}`,
+    `Description: ${item.label}`,
+    `Total: ${formatDuration(item.seconds)}`,
   ].join("\n");
 }
 
@@ -651,7 +665,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
   }
 
   return (
-    <div className="space-y-6 rounded-3xl border border-slate-200/70 bg-gradient-to-br from-white via-sky-50/35 to-emerald-50/35 p-4 md:p-5">
+    <div className="space-y-6 rounded-3xl border border-slate-200/70 bg-gradient-to-br from-white via-sky-50/35 to-emerald-50/35 p-2 md:p-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
           <button
@@ -831,7 +845,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
               )}
               {data.entries.length > 0 && (
                 <div className="overflow-x-auto">
-                  <div className="grid min-w-[700px] grid-cols-[4.5rem_1fr] gap-3">
+                  <div className="grid min-w-[620px] grid-cols-[3.5rem_1fr] gap-2">
                     <div className="relative" style={{ height: `${HOURS_IN_DAY * HOUR_HEIGHT}px` }}>
                       {Array.from({ length: HOURS_IN_DAY + 1 }).map((_, hour) => (
                         <div
@@ -878,9 +892,6 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                         >
                           <div className="overflow-hidden">
                             <p className="truncate text-xs font-semibold text-slate-900">{block.title}</p>
-                            <p className="truncate text-[11px] text-slate-700">Project: {block.project}</p>
-                            <p className="truncate text-[11px] text-slate-600">{block.timeRange}</p>
-                            <p className="truncate text-[11px] text-slate-600">{block.durationLabel}</p>
                           </div>
                         </button>
                       );
@@ -1049,11 +1060,9 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                           const widthPercent =
                             maxTaskSeconds > 0 ? Math.max(10, Math.round((item.seconds / maxTaskSeconds) * 100)) : 10;
                           return (
-                            <div key={item.label}>
+                            <div key={`${item.project}-${item.label}`} title={getTaskSummaryTooltip(item)}>
                               <div className="mb-1 flex items-center justify-between gap-2 text-xs">
-                                <span className="truncate text-slate-700">
-                                  {item.label} | Project: {item.project}
-                                </span>
+                                <span className="truncate text-slate-700">{item.label}</span>
                                 <span className="font-medium text-slate-900">{formatDuration(item.seconds)}</span>
                               </div>
                               <div className="h-2 w-full rounded-full bg-slate-200">
@@ -1148,7 +1157,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
               One shared daily timeline for everyone. Matching vertical positions indicate overlap.
             </p>
             <div className="mt-4 overflow-x-auto">
-              <div className="grid min-w-[950px] grid-cols-[4.5rem_1fr] gap-3">
+              <div className="grid min-w-[760px] grid-cols-[3.5rem_1fr] gap-2">
                 <div className="relative" style={{ height: `${HOURS_IN_DAY * HOUR_HEIGHT}px` }}>
                   {Array.from({ length: HOURS_IN_DAY + 1 }).map((_, hour) => (
                     <div
@@ -1163,7 +1172,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
 
                 <div
                   className="grid gap-3"
-                  style={{ gridTemplateColumns: `repeat(${Math.max(1, teamTimeline.length)}, minmax(180px, 1fr))` }}
+                  style={{ gridTemplateColumns: `repeat(${Math.max(1, teamTimeline.length)}, minmax(160px, 1fr))` }}
                 >
                   {teamTimeline.map((memberTimeline) => (
                     <div key={memberTimeline.name} className="space-y-2">
@@ -1206,8 +1215,6 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                             >
                               <div className="overflow-hidden">
                                 <p className="truncate text-xs font-semibold text-slate-900">{block.title}</p>
-                                <p className="truncate text-[11px] text-slate-700">Project: {block.project}</p>
-                                <p className="truncate text-[11px] text-slate-700">{block.timeRange}</p>
                               </div>
                             </button>
                           );
