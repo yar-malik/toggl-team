@@ -127,28 +127,31 @@ export default function MemberProfilePageClient({
 
   return (
     <div className="min-h-screen bg-[#EDFDF5]">
-      <main className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-8 py-8 md:px-10">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-700">Member Profile</p>
-            <h1 className="text-3xl font-semibold text-slate-900 md:text-4xl">{memberName}</h1>
+      <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-8 px-8 py-8 md:px-10">
+        <header className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-700">Voho Team Overview</p>
+              <h1 className="text-3xl font-semibold text-slate-900 md:text-4xl">{memberName}</h1>
+              <p className="max-w-2xl text-base text-slate-600">Member profile view with detailed KPIs and 7-day trends.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Link href="/" className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">
+                Back to dashboard
+              </Link>
+              <button
+                type="button"
+                onClick={() => {
+                  forceRefreshRef.current = true;
+                  setRefreshTick((value) => value + 1);
+                }}
+                className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white"
+              >
+                Refresh now
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Link href="/" className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">
-              Back to dashboard
-            </Link>
-            <button
-              type="button"
-              onClick={() => {
-                forceRefreshRef.current = true;
-                setRefreshTick((value) => value + 1);
-              }}
-              className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white"
-            >
-              Refresh now
-            </button>
-          </div>
-        </div>
+        </header>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <label className="text-sm font-medium text-slate-600">End date</label>
