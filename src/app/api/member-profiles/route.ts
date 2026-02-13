@@ -6,10 +6,9 @@ import {
   getTeamMembers,
   getTokenForMember,
 } from "@/lib/toggl";
-import { getCacheSnapshot, setCacheSnapshot } from "@/lib/cacheStore";
+import { persistHistoricalError, persistHistoricalSnapshot } from "@/lib/historyStore";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const CACHE_TTL_MS = 30 * 60 * 1000;
 const EXCLUDED_PROJECT_NAME = "non-work-task";
 const WORK_ITEM_LIMIT = 8;
 
@@ -49,33 +48,37 @@ type MemberProfile = {
   aiAnalysis: string | null;
 };
 
-type CacheEntry = {
-  startDate: string;
-  endDate: string;
-  weekDates: string[];
-  members: MemberProfile[];
-  cachedAt: string;
-  aiEnabled: boolean;
-  aiWarning?: string | null;
+type ProfileEntry = {
+  memberName: string;
+  description: string | null;
+  start: string;
+  durationSeconds: number;
+  projectName: string | null;
 };
 
-function ensureProfileKpis(profile: MemberProfile): MemberProfile {
-  const hasKpis = Array.isArray((profile as { kpis?: unknown }).kpis);
-  if (hasKpis) return profile;
+type StoredTimeEntryRow = {
+  member_name: string;
+  description: string | null;
+  start_at: string;
+  duration_seconds: number;
+  project_key: string | null;
+  synced_at: string;
+};
+
+function isSupabaseConfigured() {
+  return Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+}
+
+function supabaseHeaders() {
+  const token = process.env.SUPABASE_SERVICE_ROLE_KEY!;
   return {
-    ...profile,
-    kpis: buildAutoKpis(profile),
+    apikey: token,
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
   };
 }
 
 function createEmptyProfile(name: string, weekDates: string[]): MemberProfile {
-  const kpis: KpiItem[] = [
-    { label: "Active days", value: "0/7", source: "auto" },
-    { label: "Avg/day", value: "0h 0m", source: "auto" },
-    { label: "Avg entry", value: "0h 0m", source: "auto" },
-    { label: "Unique projects", value: "0", source: "auto" },
-    { label: "Top project share", value: "No project (0%)", source: "auto" },
-  ];
   return {
     name,
     totalSeconds: 0,
@@ -89,7 +92,13 @@ function createEmptyProfile(name: string, weekDates: string[]): MemberProfile {
     topProjectSharePct: 0,
     days: weekDates.map((date) => ({ date, seconds: 0, entryCount: 0 })),
     workItems: [],
-    kpis,
+    kpis: [
+      { label: "Active days", value: "0/7", source: "auto" },
+      { label: "Avg/day", value: "0h 0m", source: "auto" },
+      { label: "Avg entry", value: "0h 0m", source: "auto" },
+      { label: "Unique projects", value: "0", source: "auto" },
+      { label: "Top project share", value: "No project (0%)", source: "auto" },
+    ],
     aiAnalysis: null,
   };
 }
@@ -100,7 +109,12 @@ function formatDuration(totalSeconds: number): string {
   return `${hours}h ${minutes}m`;
 }
 
-function buildAutoKpis(profile: Pick<MemberProfile, "activeDays" | "averageDailySeconds" | "averageEntrySeconds" | "uniqueProjects" | "topProject" | "topProjectSharePct">): KpiItem[] {
+function buildAutoKpis(
+  profile: Pick<
+    MemberProfile,
+    "activeDays" | "averageDailySeconds" | "averageEntrySeconds" | "uniqueProjects" | "topProject" | "topProjectSharePct"
+  >
+): KpiItem[] {
   return [
     { label: "Active days", value: `${profile.activeDays}/7`, source: "auto" },
     { label: "Avg/day", value: formatDuration(profile.averageDailySeconds), source: "auto" },
@@ -219,7 +233,7 @@ function getDateKeyAtOffset(iso: string, tzOffsetMinutes: number) {
   return shifted.toISOString().slice(0, 10);
 }
 
-function getEntrySeconds(entry: Awaited<ReturnType<typeof fetchTimeEntries>>[number]) {
+function normalizeDurationFromToggl(entry: Awaited<ReturnType<typeof fetchTimeEntries>>[number]) {
   if (entry.duration >= 0) return entry.duration;
   const startedAt = new Date(entry.start).getTime();
   if (Number.isNaN(startedAt)) return 0;
@@ -318,6 +332,156 @@ async function buildAiAnalysis(member: MemberProfile): Promise<string | null> {
   }
 }
 
+function buildProfilesFromEntries(
+  members: Array<{ name: string }>,
+  entries: ProfileEntry[],
+  weekDates: string[],
+  tzOffsetMinutes: number,
+  kpiOverrides: Map<string, KpiItem[]>
+): MemberProfile[] {
+  return members.map((member) => {
+    const dayMap = new Map<string, DaySummary>(weekDates.map((date) => [date, { date, seconds: 0, entryCount: 0 }]));
+    const workItemMap = new Map<string, WorkItemSummary>();
+    const projectSecondsMap = new Map<string, number>();
+    const projectSet = new Set<string>();
+    const descriptionSet = new Set<string>();
+
+    let totalSeconds = 0;
+    let entryCount = 0;
+
+    for (const entry of entries) {
+      if (entry.memberName !== member.name) continue;
+      const project = normalizeLabel(entry.projectName, "No project");
+      if (project.toLowerCase() === EXCLUDED_PROJECT_NAME) continue;
+      const description = normalizeLabel(entry.description, "(No description)");
+      const seconds = Math.max(0, entry.durationSeconds);
+      const day = getDateKeyAtOffset(entry.start, tzOffsetMinutes);
+
+      totalSeconds += seconds;
+      entryCount += 1;
+      projectSet.add(project);
+      descriptionSet.add(description);
+      projectSecondsMap.set(project, (projectSecondsMap.get(project) ?? 0) + seconds);
+
+      if (day) {
+        const bucket = dayMap.get(day);
+        if (bucket) {
+          bucket.seconds += seconds;
+          bucket.entryCount += 1;
+        }
+      }
+
+      const workKey = `${project}::${description}`;
+      const existing = workItemMap.get(workKey);
+      if (existing) {
+        existing.seconds += seconds;
+        existing.entryCount += 1;
+      } else {
+        workItemMap.set(workKey, { project, description, seconds, entryCount: 1 });
+      }
+    }
+
+    const days = weekDates.map((date) => dayMap.get(date) ?? { date, seconds: 0, entryCount: 0 });
+    const activeDays = days.filter((day) => day.seconds > 0).length;
+    const averageDailySeconds = Math.floor(totalSeconds / 7);
+    const averageEntrySeconds = entryCount > 0 ? Math.floor(totalSeconds / entryCount) : 0;
+    const topProjectEntry = Array.from(projectSecondsMap.entries()).sort((a, b) => b[1] - a[1])[0];
+    const topProject = topProjectEntry?.[0] ?? "No project";
+    const topProjectSharePct =
+      totalSeconds > 0 && topProjectEntry ? Math.round((topProjectEntry[1] / totalSeconds) * 100) : 0;
+    const workItems = Array.from(workItemMap.values())
+      .sort((a, b) => b.seconds - a.seconds)
+      .slice(0, WORK_ITEM_LIMIT);
+
+    const baseProfile = {
+      name: member.name,
+      totalSeconds,
+      entryCount,
+      activeDays,
+      averageDailySeconds,
+      averageEntrySeconds,
+      uniqueProjects: projectSet.size,
+      uniqueDescriptions: descriptionSet.size,
+      topProject,
+      topProjectSharePct,
+      days,
+      workItems,
+      kpis: [],
+      aiAnalysis: null,
+    } satisfies MemberProfile;
+    const overrideKpis = kpiOverrides.get(normalizeMemberKey(member.name)) ?? null;
+    return { ...baseProfile, kpis: overrideKpis ?? buildAutoKpis(baseProfile) } satisfies MemberProfile;
+  });
+}
+
+async function readStoredEntries(
+  members: Array<{ name: string }>,
+  startIso: string,
+  endIso: string
+): Promise<{ entries: ProfileEntry[]; latestSyncedAt: string | null }> {
+  if (!isSupabaseConfigured()) return { entries: [], latestSyncedAt: null };
+  if (members.length === 0) return { entries: [], latestSyncedAt: null };
+
+  const base = process.env.SUPABASE_URL!;
+  const quotedMembers = members
+    .map((member) => `"${member.name.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`)
+    .join(",");
+  const memberFilter = `in.(${quotedMembers})`;
+  const timeEntriesUrl =
+    `${base}/rest/v1/time_entries` +
+    `?select=member_name,description,start_at,duration_seconds,project_key,synced_at` +
+    `&member_name=${encodeURIComponent(memberFilter)}` +
+    `&start_at=gte.${encodeURIComponent(startIso)}` +
+    `&start_at=lte.${encodeURIComponent(endIso)}` +
+    `&order=start_at.asc`;
+
+  const timeEntriesResponse = await fetch(timeEntriesUrl, {
+    method: "GET",
+    headers: supabaseHeaders(),
+    cache: "no-store",
+  });
+  if (!timeEntriesResponse.ok) return { entries: [], latestSyncedAt: null };
+  const rows = (await timeEntriesResponse.json()) as StoredTimeEntryRow[];
+  if (!Array.isArray(rows) || rows.length === 0) return { entries: [], latestSyncedAt: null };
+
+  const latestSyncedAt = rows.reduce<string | null>((latest, row) => {
+    if (!latest) return row.synced_at;
+    return row.synced_at > latest ? row.synced_at : latest;
+  }, null);
+
+  const uniqueProjectKeys = Array.from(
+    new Set(rows.map((row) => row.project_key).filter((value): value is string => typeof value === "string" && value.length > 0))
+  );
+  const projectNameByKey = new Map<string, string>();
+  if (uniqueProjectKeys.length > 0) {
+    const projectFilter = `in.(${uniqueProjectKeys.map((key) => `"${key.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")})`;
+    const projectsUrl =
+      `${base}/rest/v1/projects?select=project_key,project_name` +
+      `&project_key=${encodeURIComponent(projectFilter)}`;
+    const projectsResponse = await fetch(projectsUrl, {
+      method: "GET",
+      headers: supabaseHeaders(),
+      cache: "no-store",
+    });
+    if (projectsResponse.ok) {
+      const projectRows = (await projectsResponse.json()) as Array<{ project_key: string; project_name: string }>;
+      for (const row of projectRows) {
+        if (!row.project_key) continue;
+        projectNameByKey.set(row.project_key, row.project_name);
+      }
+    }
+  }
+
+  const entries: ProfileEntry[] = rows.map((row) => ({
+    memberName: row.member_name,
+    description: row.description,
+    start: row.start_at,
+    durationSeconds: row.duration_seconds,
+    projectName: row.project_key ? projectNameByKey.get(row.project_key) ?? null : null,
+  }));
+  return { entries, latestSyncedAt };
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const dateParam = searchParams.get("date");
@@ -332,28 +496,6 @@ export async function GET(request: NextRequest) {
 
   const weekDates = getLastSevenDates(endDate);
   const startDate = weekDates[0];
-  const memberCachePart = memberParam ? memberParam.toLowerCase() : "all";
-  const cacheKey = `member-profiles::${startDate}::${endDate}::${memberCachePart}`;
-  const cachedFresh = await getCacheSnapshot<CacheEntry>(cacheKey, false);
-  const cachedAny = await getCacheSnapshot<CacheEntry>(cacheKey, true);
-
-  if (!forceRefresh && cachedFresh) {
-    return NextResponse.json({
-      ...cachedFresh,
-      members: cachedFresh.members.map((profile) => ensureProfileKpis(profile)),
-      stale: false,
-      warning: null,
-    });
-  }
-  if (!forceRefresh && cachedAny) {
-    return NextResponse.json({
-      ...cachedAny,
-      members: cachedAny.members.map((profile) => ensureProfileKpis(profile)),
-      stale: true,
-      warning: "Showing last cached profile snapshot. Click Refresh now for newer data.",
-    });
-  }
-
   const teamMembers = getTeamMembers();
   if (teamMembers.length === 0) {
     return NextResponse.json({ error: "No members configured" }, { status: 400 });
@@ -364,111 +506,95 @@ export async function GET(request: NextRequest) {
   if (memberParam && members.length === 0) {
     return NextResponse.json({ error: "Unknown member" }, { status: 404 });
   }
-  if (!forceRefresh && !cachedAny) {
-    return NextResponse.json({
-      startDate,
-      endDate,
-      weekDates,
-      members: members.map((member) => createEmptyProfile(member.name, weekDates)),
-      cachedAt: new Date().toISOString(),
-      stale: true,
-      warning: "No cached profile snapshot yet. Click Refresh now to fetch and save latest data.",
-      aiEnabled: Boolean(process.env.OPENAI_API_KEY),
-      aiWarning: null,
-    });
-  }
 
   const range = buildUtcRangeFromLocalDates(startDate, endDate, tzOffsetMinutes);
   const aiEnabled = Boolean(process.env.OPENAI_API_KEY);
   const kpiOverrides = await fetchKpiOverridesFromCsv();
 
+  if (!forceRefresh) {
+    const stored = await readStoredEntries(members, range.startIso, range.endIso);
+    if (stored.entries.length === 0) {
+      return NextResponse.json({
+        startDate,
+        endDate,
+        weekDates,
+        members: members.map((member) => createEmptyProfile(member.name, weekDates)),
+        cachedAt: new Date().toISOString(),
+        stale: true,
+        warning: "No stored history yet. Click Refresh now once to import and save this range.",
+        aiEnabled,
+        aiWarning: null,
+      });
+    }
+
+    const profiles = buildProfilesFromEntries(members, stored.entries, weekDates, tzOffsetMinutes, kpiOverrides);
+    const sorted = [...profiles].sort((a, b) => {
+      if (b.totalSeconds !== a.totalSeconds) return b.totalSeconds - a.totalSeconds;
+      if (b.entryCount !== a.entryCount) return b.entryCount - a.entryCount;
+      return a.name.localeCompare(b.name);
+    });
+    return NextResponse.json({
+      startDate,
+      endDate,
+      weekDates,
+      members: sorted,
+      cachedAt: stored.latestSyncedAt ?? new Date().toISOString(),
+      stale: false,
+      warning: null,
+      aiEnabled,
+      aiWarning: aiEnabled ? "AI analysis is generated on manual refresh to avoid unnecessary API usage." : null,
+    });
+  }
+
   try {
-    const profiles = await Promise.all(
+    const entriesForProfiles = await Promise.all(
       members.map(async (member) => {
-        const emptyDays = weekDates.map((date) => ({ date, seconds: 0, entryCount: 0 }));
         const token = getTokenForMember(member.name);
         if (!token) {
-          return { ...createEmptyProfile(member.name, weekDates), days: emptyDays } satisfies MemberProfile;
+          return [] as ProfileEntry[];
         }
 
         const entries = await fetchTimeEntries(token, range.startIso, range.endIso);
         const projectNames = await fetchProjectNames(token, entries);
-        const dayMap = new Map<string, DaySummary>(weekDates.map((date) => [date, { date, seconds: 0, entryCount: 0 }]));
-        const workItemMap = new Map<string, WorkItemSummary>();
-        const projectSecondsMap = new Map<string, number>();
-        const projectSet = new Set<string>();
-        const descriptionSet = new Set<string>();
+        const profileEntries: ProfileEntry[] = entries.map((entry) => ({
+          memberName: member.name,
+          description: entry.description,
+          start: entry.start,
+          durationSeconds: normalizeDurationFromToggl(entry),
+          projectName: getEntryProjectName(entry, projectNames),
+        }));
 
-        let totalSeconds = 0;
-        let entryCount = 0;
-
+        const entriesByLocalDate = new Map<string, Array<Awaited<ReturnType<typeof fetchTimeEntries>>[number]>>();
         for (const entry of entries) {
-          const project = normalizeLabel(getEntryProjectName(entry, projectNames), "No project");
-          if (project.toLowerCase() === EXCLUDED_PROJECT_NAME) continue;
-
-          const description = normalizeLabel(entry.description, "(No description)");
-          const seconds = getEntrySeconds(entry);
-          const day = getDateKeyAtOffset(entry.start, tzOffsetMinutes);
-
-          totalSeconds += seconds;
-          entryCount += 1;
-          projectSet.add(project);
-          descriptionSet.add(description);
-          projectSecondsMap.set(project, (projectSecondsMap.get(project) ?? 0) + seconds);
-
-          if (day) {
-            const bucket = dayMap.get(day);
-            if (bucket) {
-              bucket.seconds += seconds;
-              bucket.entryCount += 1;
-            }
-          }
-
-          const workKey = `${project}::${description}`;
-          const existing = workItemMap.get(workKey);
-          if (existing) {
-            existing.seconds += seconds;
-            existing.entryCount += 1;
-          } else {
-            workItemMap.set(workKey, { project, description, seconds, entryCount: 1 });
-          }
+          const localDate = getDateKeyAtOffset(entry.start, tzOffsetMinutes) ?? endDate;
+          const current = entriesByLocalDate.get(localDate) ?? [];
+          current.push({
+            ...entry,
+            project_name: getEntryProjectName(entry, projectNames) ?? null,
+          } as Awaited<ReturnType<typeof fetchTimeEntries>>[number]);
+          entriesByLocalDate.set(localDate, current);
         }
 
-        const days = weekDates.map((date) => dayMap.get(date) ?? { date, seconds: 0, entryCount: 0 });
-        const activeDays = days.filter((day) => day.seconds > 0).length;
-        const averageDailySeconds = Math.floor(totalSeconds / 7);
-        const averageEntrySeconds = entryCount > 0 ? Math.floor(totalSeconds / entryCount) : 0;
-        const topProjectEntry = Array.from(projectSecondsMap.entries()).sort((a, b) => b[1] - a[1])[0];
-        const topProject = topProjectEntry?.[0] ?? "No project";
-        const topProjectSharePct =
-          totalSeconds > 0 && topProjectEntry ? Math.round((topProjectEntry[1] / totalSeconds) * 100) : 0;
-        const workItems = Array.from(workItemMap.values())
-          .sort((a, b) => b.seconds - a.seconds)
-          .slice(0, WORK_ITEM_LIMIT);
+        await Promise.all(
+          Array.from(entriesByLocalDate.entries()).map(([localDate, list]) =>
+            persistHistoricalSnapshot(
+              "team",
+              member.name,
+              localDate,
+              list.map((entry) => ({
+                ...entry,
+                project_name: getEntryProjectName(entry, projectNames) ?? null,
+              }))
+            )
+          )
+        );
 
-        const baseProfile = {
-          name: member.name,
-          totalSeconds,
-          entryCount,
-          activeDays,
-          averageDailySeconds,
-          averageEntrySeconds,
-          uniqueProjects: projectSet.size,
-          uniqueDescriptions: descriptionSet.size,
-          topProject,
-          topProjectSharePct,
-          days,
-          workItems,
-          kpis: [],
-          aiAnalysis: null,
-        } satisfies MemberProfile;
-        const overrideKpis = kpiOverrides.get(normalizeMemberKey(member.name)) ?? null;
-        return {
-          ...baseProfile,
-          kpis: overrideKpis ?? buildAutoKpis(baseProfile),
-        } satisfies MemberProfile;
+        return profileEntries;
       })
     );
+
+    const mergedEntries = entriesForProfiles.flat();
+    const profiles = buildProfilesFromEntries(members, mergedEntries, weekDates, tzOffsetMinutes, kpiOverrides);
 
     let aiWarning: string | null = null;
     const profilesWithAi = await Promise.all(
@@ -488,7 +614,7 @@ export async function GET(request: NextRequest) {
       return a.name.localeCompare(b.name);
     });
 
-    const payload: CacheEntry = {
+    return NextResponse.json({
       startDate,
       endDate,
       weekDates,
@@ -496,21 +622,13 @@ export async function GET(request: NextRequest) {
       cachedAt: new Date().toISOString(),
       aiEnabled,
       aiWarning,
-    };
-    await setCacheSnapshot(cacheKey, payload, CACHE_TTL_MS);
-    return NextResponse.json({ ...payload, stale: false, warning: null });
+      stale: false,
+      warning: null,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     const status = (error as Error & { status?: number }).status ?? 502;
-
-    if (cachedAny) {
-      return NextResponse.json({
-        ...cachedAny,
-        stale: true,
-        warning: "Could not refresh member profiles. Showing cached snapshot.",
-      });
-    }
-
+    await persistHistoricalError("team", memberParam || null, endDate, message);
     return NextResponse.json({ error: message }, { status: status >= 400 ? status : 502 });
   }
 }
