@@ -38,6 +38,15 @@ type ProjectItem = { key: string; name: string; source: "manual" | "external" };
 type ProjectsResponse = { projects: ProjectItem[]; error?: string };
 
 type CalendarDraft = { hour: number; minute: number };
+type EntryEditorState = {
+  entryId: number;
+  description: string;
+  project: string;
+  startTime: string;
+  stopTime: string;
+  saving: boolean;
+  error: string | null;
+};
 
 const CALENDAR_HOUR_HEIGHT = 56;
 
@@ -60,6 +69,23 @@ function formatClock(iso: string | null | undefined): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "--:--";
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatTimeInputLocal(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mm = String(date.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function buildIsoFromDateAndTime(dateInput: string, timeInput: string): string | null {
+  if (!/^\d{2}:\d{2}$/.test(timeInput)) return null;
+  const [hour, minute] = timeInput.split(":").map(Number);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return new Date(`${dateInput}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`).toISOString();
 }
 
 function buildLocalDateTimeIso(dateInput: string, hour: number, minute: number): string {
@@ -99,11 +125,15 @@ function buildCalendarBlock(entry: TimeEntry, dayStartMs: number) {
   const durationMinutes = Math.max(15, (safeStopMs - startMs) / (60 * 1000));
   return {
     id: `${entry.id}-${startMs}`,
+    entryId: entry.id,
     top: (minutesFromStart / 60) * CALENDAR_HOUR_HEIGHT,
     height: (durationMinutes / 60) * CALENDAR_HOUR_HEIGHT,
     description: entry.description?.trim() || "(No description)",
     project: entry.project_name?.trim() || "No project",
     timeRange: `${formatClock(entry.start)} - ${formatClock(entry.stop)}`,
+    startIso: entry.start,
+    stopIso: entry.stop,
+    durationSeconds: Math.max(0, entry.duration),
   };
 }
 
@@ -137,6 +167,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
   const [projectName, setProjectName] = useState("");
   const [calendarDraft, setCalendarDraft] = useState<CalendarDraft | null>(null);
   const [draftDurationMinutes, setDraftDurationMinutes] = useState("60");
+  const [entryEditor, setEntryEditor] = useState<EntryEditorState | null>(null);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
@@ -482,15 +513,27 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
               ))}
 
               {calendarBlocks.map((block) => (
-                <div
+                <button
                   key={block.id}
-                  className={`absolute left-24 right-8 overflow-hidden rounded-lg border px-2 py-1 text-xs shadow-sm ${projectColorClass(block.project)}`}
+                  type="button"
+                  onClick={() =>
+                    setEntryEditor({
+                      entryId: block.entryId,
+                      description: block.description === "(No description)" ? "" : block.description,
+                      project: block.project === "No project" ? "" : block.project,
+                      startTime: formatTimeInputLocal(block.startIso),
+                      stopTime: formatTimeInputLocal(block.stopIso),
+                      saving: false,
+                      error: null,
+                    })
+                  }
+                  className={`absolute left-24 right-8 overflow-hidden rounded-lg border px-2 py-1 text-left text-xs shadow-sm ${projectColorClass(block.project)}`}
                   style={{ top: `${block.top}px`, height: `${Math.max(22, block.height)}px` }}
                 >
                   <p className="truncate font-semibold text-slate-900">{block.description}</p>
                   <p className="truncate text-slate-700">{block.project}</p>
                   <p className="text-[11px] text-slate-600">{block.timeRange}</p>
-                </div>
+                </button>
               ))}
 
               {nowMarkerTop !== null && (
@@ -507,6 +550,108 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
           </div>
         </aside>
       </div>
+
+      {entryEditor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4">
+          <div className="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <div className="inline-flex items-center gap-2 rounded-full bg-fuchsia-100 px-3 py-1 text-sm font-medium text-fuchsia-800">
+                <span className="inline-flex h-2.5 w-2.5 rounded-full bg-fuchsia-500" />
+                Edit time entry
+              </div>
+              <button type="button" onClick={() => setEntryEditor(null)} className="text-3xl leading-none text-slate-500">
+                ×
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-4">
+              <input
+                type="text"
+                value={entryEditor.description}
+                onChange={(event) => setEntryEditor((prev) => (prev ? { ...prev, description: event.target.value } : prev))}
+                placeholder="Description"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-3xl font-semibold text-slate-900"
+              />
+
+              <div className="flex flex-wrap items-center gap-3">
+                <input
+                  type="text"
+                  value={entryEditor.project}
+                  onChange={(event) => setEntryEditor((prev) => (prev ? { ...prev, project: event.target.value } : prev))}
+                  placeholder="Project"
+                  list="project-list"
+                  className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xl text-amber-900"
+                />
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="time"
+                    value={entryEditor.startTime}
+                    onChange={(event) => setEntryEditor((prev) => (prev ? { ...prev, startTime: event.target.value } : prev))}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-2xl"
+                  />
+                  <span className="text-3xl text-slate-400">→</span>
+                  <input
+                    type="time"
+                    value={entryEditor.stopTime}
+                    onChange={(event) => setEntryEditor((prev) => (prev ? { ...prev, stopTime: event.target.value } : prev))}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-2xl"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  disabled={entryEditor.saving}
+                  onClick={async () => {
+                    const startAt = buildIsoFromDateAndTime(date, entryEditor.startTime);
+                    const stopAt = buildIsoFromDateAndTime(date, entryEditor.stopTime);
+                    if (!startAt || !stopAt) {
+                      setEntryEditor((prev) => (prev ? { ...prev, error: "Please enter valid start and end times." } : prev));
+                      return;
+                    }
+                    if (new Date(stopAt).getTime() <= new Date(startAt).getTime()) {
+                      setEntryEditor((prev) => (prev ? { ...prev, error: "End time must be after start time." } : prev));
+                      return;
+                    }
+
+                    setEntryEditor((prev) => (prev ? { ...prev, saving: true, error: null } : prev));
+                    try {
+                      const res = await fetch("/api/time-entries/update", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          member: memberName,
+                          entryId: entryEditor.entryId,
+                          description: entryEditor.description,
+                          project: entryEditor.project,
+                          startAt,
+                          stopAt,
+                          tzOffset: new Date().getTimezoneOffset(),
+                        }),
+                      });
+                      const data = (await res.json()) as { error?: string };
+                      if (!res.ok || data.error) throw new Error(data.error || "Failed to update entry");
+                      setEntryEditor(null);
+                      setRefreshTick((v) => v + 1);
+                    } catch (err) {
+                      setEntryEditor((prev) => ({
+                        ...(prev as EntryEditorState),
+                        saving: false,
+                        error: err instanceof Error ? err.message : "Failed to update entry",
+                      }));
+                    }
+                  }}
+                  className="ml-auto rounded-xl bg-fuchsia-600 px-8 py-3 text-2xl font-semibold text-white disabled:bg-slate-300"
+                >
+                  {entryEditor.saving ? "Saving..." : "Save"}
+                </button>
+              </div>
+
+              {entryEditor.error && <p className="rounded bg-rose-50 px-3 py-2 text-sm text-rose-700">{entryEditor.error}</p>}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -168,14 +168,36 @@ export default function PlatformShell({
       }
     }
 
+    const handleTimerChanged = (event: Event) => {
+      const custom = event as CustomEvent<{
+        memberName?: string;
+        isRunning?: boolean;
+        startAt?: string | null;
+        durationSeconds?: number;
+      }>;
+      const detail = custom.detail;
+      if (!detail) return;
+      if ((detail.memberName ?? "").toLowerCase() !== resolvedMember.toLowerCase()) return;
+
+      if (detail.isRunning) {
+        setTimerStartAt(detail.startAt ?? new Date().toISOString());
+        setFallbackDurationSeconds(Math.max(0, detail.durationSeconds ?? 0));
+      } else {
+        setTimerStartAt(null);
+        setFallbackDurationSeconds(0);
+      }
+    };
+
     void loadTimerState();
     const refreshInterval = window.setInterval(() => void loadTimerState(), 60 * 1000);
     const onFocus = () => void loadTimerState();
     window.addEventListener("focus", onFocus);
+    window.addEventListener("voho-timer-changed", handleTimerChanged as EventListener);
     return () => {
       active = false;
       window.clearInterval(refreshInterval);
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener("voho-timer-changed", handleTimerChanged as EventListener);
     };
   }, [currentMemberName]);
 

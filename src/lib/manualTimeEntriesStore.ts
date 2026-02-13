@@ -671,3 +671,101 @@ export async function createManualTimeEntry(input: {
     source: created.entry_source || "manual",
   };
 }
+
+export async function updateStoredTimeEntry(input: {
+  memberName: string;
+  entryId: number;
+  description: string | null;
+  projectName: string | null;
+  startAtIso: string;
+  stopAtIso: string;
+  tzOffsetMinutes?: number | null;
+}) {
+  if (!isSupabaseConfigured()) {
+    throw new Error("Supabase history is not configured");
+  }
+
+  const startAt = new Date(input.startAtIso);
+  const stopAt = new Date(input.stopAtIso);
+  if (Number.isNaN(startAt.getTime()) || Number.isNaN(stopAt.getTime())) {
+    throw new Error("Invalid start/stop time");
+  }
+  if (stopAt.getTime() <= startAt.getTime()) {
+    throw new Error("Stop time must be after start time");
+  }
+
+  const existingResponse = await fetch(
+    `${getBaseUrl()}/rest/v1/time_entries?select=toggl_entry_id,member_name,entry_source,source_entry_id&toggl_entry_id=eq.${input.entryId}&limit=1`,
+    {
+      method: "GET",
+      headers: supabaseHeaders(),
+      cache: "no-store",
+    }
+  );
+  if (!existingResponse.ok) {
+    throw new Error("Failed to read existing entry");
+  }
+  const existingRows = (await existingResponse.json()) as Array<{
+    toggl_entry_id: number;
+    member_name: string;
+    entry_source: string;
+    source_entry_id: string | null;
+  }>;
+  const existing = existingRows[0];
+  if (!existing) {
+    throw new Error("Entry not found");
+  }
+  if (existing.member_name.toLowerCase() !== input.memberName.toLowerCase()) {
+    throw new Error("Entry does not belong to member");
+  }
+
+  await ensureMember(input.memberName);
+  const { projectKey, projectName } = await ensureManualProject(input.projectName);
+  const durationSeconds = Math.max(0, Math.floor((stopAt.getTime() - startAt.getTime()) / 1000));
+  const tzOffsetMinutes = parseTzOffsetMinutes(input.tzOffsetMinutes);
+  const sourceDate = toLocalDateKey(startAt, tzOffsetMinutes);
+  const nowIso = new Date().toISOString();
+
+  const updateResponse = await fetch(`${getBaseUrl()}/rest/v1/time_entries?toggl_entry_id=eq.${input.entryId}`, {
+    method: "PATCH",
+    headers: {
+      ...supabaseHeaders(),
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify({
+      description: normalizeDescription(input.description),
+      project_key: projectKey,
+      start_at: startAt.toISOString(),
+      stop_at: stopAt.toISOString(),
+      duration_seconds: durationSeconds,
+      is_running: false,
+      source_date: sourceDate,
+      synced_at: nowIso,
+      raw: {
+        source: existing.entry_source || "manual",
+        action: "edited",
+        edited_at: nowIso,
+      },
+    }),
+    cache: "no-store",
+  });
+  if (!updateResponse.ok) {
+    throw new Error("Failed to update entry");
+  }
+  const rows = (await updateResponse.json()) as StoredEntryRow[];
+  const updated = rows[0];
+  if (!updated) {
+    throw new Error("Update returned no entry");
+  }
+
+  return {
+    id: updated.toggl_entry_id,
+    member: updated.member_name,
+    description: updated.description,
+    projectName,
+    startAt: updated.start_at,
+    stopAt: updated.stop_at,
+    durationSeconds: updated.duration_seconds,
+    source: updated.entry_source || "manual",
+  };
+}
