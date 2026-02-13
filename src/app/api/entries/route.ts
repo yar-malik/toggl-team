@@ -10,6 +10,9 @@ import {
 } from "@/lib/toggl";
 import { persistHistoricalError, persistHistoricalSnapshot } from "@/lib/historyStore";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 type EntriesPayload = {

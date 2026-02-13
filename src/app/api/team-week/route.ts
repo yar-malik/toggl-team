@@ -8,6 +8,9 @@ import {
 } from "@/lib/toggl";
 import { persistHistoricalError, persistHistoricalSnapshot, persistWeeklyRollup } from "@/lib/historyStore";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const EXCLUDED_PROJECT_NAME = "non-work-task";
 
