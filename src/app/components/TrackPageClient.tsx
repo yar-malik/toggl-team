@@ -283,6 +283,10 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
 
   const hours = useMemo(() => Array.from({ length: 24 }, (_, hour) => hour), []);
 
+  function emitTimerChanged(detail: { memberName: string; isRunning: boolean; startAt?: string | null; durationSeconds?: number }) {
+    window.dispatchEvent(new CustomEvent("voho-timer-changed", { detail }));
+  }
+
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-200 px-5 py-4">
@@ -325,8 +329,20 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ member: memberName, description, project: projectName, tzOffset: new Date().getTimezoneOffset() }),
                   });
-                  const data = (await res.json()) as { error?: string };
+                  const data = (await res.json()) as {
+                    error?: string;
+                    current?: { id: number; description: string | null; projectName: string | null; startAt: string; durationSeconds: number } | null;
+                  };
                   if (!res.ok || data.error) throw new Error(data.error || "Failed to start timer");
+                  if (data.current) {
+                    setCurrentTimer(data.current);
+                    emitTimerChanged({
+                      memberName,
+                      isRunning: true,
+                      startAt: data.current.startAt,
+                      durationSeconds: data.current.durationSeconds,
+                    });
+                  }
                   setRefreshTick((v) => v + 1);
                 } catch (err) {
                   setError(err instanceof Error ? err.message : "Failed to start timer");
@@ -353,6 +369,8 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
                   });
                   const data = (await res.json()) as { error?: string };
                   if (!res.ok || data.error) throw new Error(data.error || "Failed to stop timer");
+                  setCurrentTimer(null);
+                  emitTimerChanged({ memberName, isRunning: false, startAt: null, durationSeconds: 0 });
                   setRefreshTick((v) => v + 1);
                 } catch (err) {
                   setError(err instanceof Error ? err.message : "Failed to stop timer");

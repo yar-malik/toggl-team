@@ -9,7 +9,7 @@ type IconProps = { className?: string };
 function navClass(active: boolean) {
   return `block w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${
     active
-      ? "border border-rose-200 bg-gradient-to-r from-rose-100 to-fuchsia-100 text-rose-900 shadow-sm"
+      ? "border border-sky-200 bg-sky-100 text-sky-900 shadow-sm"
       : "border border-transparent text-slate-700 hover:border-sky-100 hover:bg-sky-50"
   }`;
 }
@@ -222,10 +222,10 @@ export default function PlatformShell({
   }, [isRunning, runningLabel]);
 
   return (
-    <div className="min-h-screen bg-[linear-gradient(180deg,#fef7ff_0%,#f5fbff_35%,#f6fffb_100%)]">
+    <div className="min-h-screen bg-[linear-gradient(180deg,#f7fcff_0%,#f8fbff_100%)]">
       <div className="mx-auto flex w-full max-w-[1700px] gap-4 px-4 py-4 md:px-6">
         <aside className="sticky top-4 hidden h-[calc(100vh-2rem)] w-[280px] shrink-0 rounded-3xl border border-slate-200 bg-white/90 p-4 shadow-[0_20px_40px_rgba(15,23,42,0.08)] backdrop-blur lg:flex lg:flex-col">
-          <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-rose-50 via-sky-50 to-emerald-50 p-3 shadow-sm">
+          <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-sky-50 to-cyan-50 p-3 shadow-sm">
             <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Voho Platform</p>
             <p className="mt-1 truncate text-sm font-medium text-slate-700">{currentUserEmail ?? "Signed in"}</p>
           </div>
@@ -297,7 +297,7 @@ export default function PlatformShell({
             </div>
           </nav>
 
-          <div className="mt-4 rounded-xl border border-slate-200 bg-gradient-to-r from-sky-50 to-violet-50 p-3 text-xs text-slate-600">
+          <div className="mt-4 rounded-xl border border-slate-200 bg-sky-50 p-3 text-xs text-slate-600">
             <p className="font-semibold text-slate-700">Tip</p>
             <p className="mt-1">Use Tracking daily and review outcomes in Reports.</p>
           </div>
