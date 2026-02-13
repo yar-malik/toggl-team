@@ -530,7 +530,7 @@ export default function TimeDashboard({
   }, [member, date, mode, refreshTick]);
 
   useEffect(() => {
-    if (!(mode === "team" || mode === "all")) return;
+    if (!(mode === "team" || mode === "all" || mode === "member")) return;
     let active = true;
     const requestNonce = String(Date.now());
     const params = new URLSearchParams({ date, tzOffset: String(new Date().getTimezoneOffset()) });
@@ -608,6 +608,21 @@ export default function TimeDashboard({
       ...buildTimelineBlocks(memberData.entries, date),
     }));
   }, [teamData, date]);
+
+  const memberWeekSeries = useMemo(() => {
+    if (!teamWeekData || !member) return [] as Array<{ date: string; seconds: number }>;
+    const row = teamWeekData.members.find((item) => item.name.toLowerCase() === member.toLowerCase());
+    if (!row) return [] as Array<{ date: string; seconds: number }>;
+    return teamWeekData.weekDates.map((day) => ({
+      date: day,
+      seconds: row.days.find((d) => d.date === day)?.seconds ?? 0,
+    }));
+  }, [teamWeekData, member]);
+
+  const memberWeekMaxSeconds = useMemo(
+    () => memberWeekSeries.reduce((max, item) => Math.max(max, item.seconds), 0),
+    [memberWeekSeries]
+  );
 
   const nowLineOffsetPx = useMemo(() => {
     const [yearStr, monthStr, dayStr] = date.split("-");
@@ -962,6 +977,32 @@ export default function TimeDashboard({
             </div>
 
             <div className="space-y-4">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5">
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-600">Last 7 days</h3>
+              <p className="mt-1 text-sm text-slate-500">Daily worked time for {member}.</p>
+              {memberWeekSeries.length === 0 ? (
+                <p className="mt-3 text-sm text-slate-500">No weekly data yet.</p>
+              ) : (
+                <div className="mt-4">
+                  <div className="flex h-44 items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    {memberWeekSeries.map((item) => {
+                      const barHeight = memberWeekMaxSeconds > 0 ? Math.max(10, Math.round((item.seconds / memberWeekMaxSeconds) * 100)) : 10;
+                      return (
+                        <div key={item.date} className="flex w-full flex-col items-center gap-2">
+                          <div
+                            className="w-full rounded-t-md bg-gradient-to-t from-sky-600 to-cyan-400"
+                            style={{ height: `${barHeight}%` }}
+                            title={`${formatShortDateLabel(item.date)}: ${formatDuration(item.seconds)}`}
+                          />
+                          <p className="text-[11px] font-medium text-slate-600">{formatShortDateLabel(item.date)}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-emerald-900">
               <h3 className="text-sm font-semibold uppercase tracking-wide">Currently running</h3>
               {runningEntry ? (
