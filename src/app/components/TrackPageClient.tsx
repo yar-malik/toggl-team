@@ -159,13 +159,13 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
 
   return (
     <div className="space-y-4">
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-violet-50/40 p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Tracking</p>
             <h1 className="text-2xl font-semibold text-slate-900">{memberName}</h1>
           </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-right">
+          <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-right">
             <p className="text-xs uppercase tracking-wide text-slate-500">Timer</p>
             <p className="text-2xl font-semibold text-slate-900">{formatDuration(runningSeconds)}</p>
             <p className="text-xs text-slate-500">{currentTimer ? "Running" : "Stopped"}</p>
@@ -265,7 +265,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
       </section>
 
       <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <section className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-sky-50/40 p-5 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-slate-900">Day Calendar</h2>
             <p className="text-xs text-slate-500">Click hour rows to add entries.</p>
@@ -361,7 +361,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <section className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-emerald-50/40 p-5 shadow-sm">
           <h2 className="text-lg font-semibold text-slate-900">Projects</h2>
           <div className="mt-3 flex gap-2">
             <input

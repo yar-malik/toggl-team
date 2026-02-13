@@ -8,7 +8,7 @@ export default function MembersPageClient({ initialMembers }: { initialMembers: 
   const members = initialMembers;
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <section className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-sky-50/50 p-5 shadow-sm">
       <h1 className="text-2xl font-semibold text-slate-900">Members</h1>
       <p className="mt-1 text-sm text-slate-600">Open a member to view detailed time entries and KPIs.</p>
 

@@ -8,6 +8,7 @@ import {
 } from "@/lib/toggl";
 import { persistHistoricalError, persistHistoricalSnapshot } from "@/lib/historyStore";
 import { getQuotaLockState, setQuotaLock } from "@/lib/quotaLockStore";
+import { canonicalizeMemberName, expandMemberAliases, namesMatch } from "@/lib/memberNames";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -497,8 +498,9 @@ async function readStoredEntries(
   if (members.length === 0) return { entries: [], latestSyncedAt: null };
 
   const base = process.env.SUPABASE_URL!;
-  const quotedMembers = members
-    .map((member) => `"${member.name.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`)
+  const memberNames = Array.from(new Set(members.flatMap((member) => expandMemberAliases(member.name))));
+  const quotedMembers = memberNames
+    .map((member) => `"${member.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`)
     .join(",");
   const memberFilter = `in.(${quotedMembers})`;
   const timeEntriesUrl =
@@ -547,7 +549,7 @@ async function readStoredEntries(
   }
 
   const entries: ProfileEntry[] = rows.map((row) => ({
-    memberName: row.member_name,
+    memberName: canonicalizeMemberName(row.member_name),
     description: row.description,
     start: row.start_at,
     durationSeconds: row.duration_seconds,
@@ -559,7 +561,8 @@ async function readStoredEntries(
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const dateParam = searchParams.get("date");
-  const memberParam = searchParams.get("member")?.trim() ?? "";
+  const memberParamRaw = searchParams.get("member")?.trim() ?? "";
+  const memberParam = memberParamRaw ? canonicalizeMemberName(memberParamRaw) : "";
   const forceRefresh = searchParams.get("refresh") === "1";
   const tzOffsetMinutes = parseTzOffsetMinutes(searchParams.get("tzOffset"));
 
@@ -575,7 +578,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "No members configured" }, { status: 400 });
   }
   const members = memberParam
-    ? teamMembers.filter((member) => member.name.toLowerCase() === memberParam.toLowerCase())
+    ? teamMembers.filter((member) => namesMatch(member.name, memberParam))
     : teamMembers;
   if (memberParam && members.length === 0) {
     return NextResponse.json({ error: "Unknown member" }, { status: 404 });

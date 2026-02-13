@@ -1,5 +1,6 @@
 import "server-only";
 import { getTeamMembers } from "@/lib/toggl";
+import { canonicalizeMemberName, namesMatch } from "@/lib/memberNames";
 
 type StoredEntryRow = {
   toggl_entry_id: number;
@@ -173,7 +174,8 @@ export async function createProject(projectName: string) {
 
 export async function listMemberKpis(memberName?: string | null): Promise<StoredKpi[]> {
   if (!isSupabaseConfigured()) return [];
-  const memberFilter = memberName?.trim() ? `&member_name=eq.${encodeURIComponent(memberName.trim())}` : "";
+  const canonicalMember = memberName?.trim() ? canonicalizeMemberName(memberName.trim()) : "";
+  const memberFilter = canonicalMember ? `&member_name=eq.${encodeURIComponent(canonicalMember)}` : "";
   const url =
     `${getBaseUrl()}/rest/v1/member_kpis` +
     `?select=id,member_name,kpi_label,kpi_value,notes,updated_at` +
@@ -195,7 +197,7 @@ export async function upsertMemberKpi(input: {
   value: string;
   notes?: string | null;
 }) {
-  const memberName = input.memberName.trim();
+  const memberName = canonicalizeMemberName(input.memberName.trim());
   const label = input.label.trim();
   const value = input.value.trim();
   const notes = input.notes?.trim() ?? null;
@@ -228,7 +230,7 @@ export async function upsertMemberKpi(input: {
 }
 
 async function ensureMember(memberName: string) {
-  const payload = [{ member_name: memberName }];
+  const payload = [{ member_name: canonicalizeMemberName(memberName) }];
   const response = await fetch(`${getBaseUrl()}/rest/v1/members?on_conflict=member_name`, {
     method: "POST",
     headers: {
@@ -244,7 +246,7 @@ async function ensureMember(memberName: string) {
 }
 
 export async function listMembers(): Promise<string[]> {
-  const envMembers = getTeamMembers().map((item) => item.name);
+  const envMembers = getTeamMembers().map((item) => canonicalizeMemberName(item.name));
   if (!isSupabaseConfigured()) {
     return Array.from(new Set(envMembers)).sort((a, b) => a.localeCompare(b));
   }
@@ -258,12 +260,14 @@ export async function listMembers(): Promise<string[]> {
     return Array.from(new Set(envMembers)).sort((a, b) => a.localeCompare(b));
   }
   const rows = (await response.json()) as StoredMember[];
-  const dbMembers = rows.map((row) => row.member_name).filter((value) => value && value.trim().length > 0);
+  const dbMembers = rows
+    .map((row) => canonicalizeMemberName(row.member_name))
+    .filter((value) => value && value.trim().length > 0);
   return Array.from(new Set([...dbMembers, ...envMembers])).sort((a, b) => a.localeCompare(b));
 }
 
 export async function listMemberProfiles(): Promise<Array<{ name: string; email: string | null; role: string | null }>> {
-  const envMembers = getTeamMembers().map((item) => item.name);
+  const envMembers = getTeamMembers().map((item) => canonicalizeMemberName(item.name));
   if (!isSupabaseConfigured()) {
     return Array.from(new Set(envMembers))
       .sort((a, b) => a.localeCompare(b))
@@ -284,10 +288,12 @@ export async function listMemberProfiles(): Promise<Array<{ name: string; email:
   const map = new Map<string, { name: string; email: string | null; role: string | null }>();
   for (const row of rows) {
     if (!row.member_name) continue;
-    map.set(row.member_name, {
-      name: row.member_name,
-      email: row.email ?? null,
-      role: row.role ?? "member",
+    const canonicalName = canonicalizeMemberName(row.member_name);
+    const existing = map.get(canonicalName);
+    map.set(canonicalName, {
+      name: canonicalName,
+      email: existing?.email ?? row.email ?? null,
+      role: existing?.role ?? row.role ?? "member",
     });
   }
   for (const name of envMembers) {
@@ -299,15 +305,15 @@ export async function listMemberProfiles(): Promise<Array<{ name: string; email:
 }
 
 export async function resolveCanonicalMemberName(inputName: string): Promise<string | null> {
-  const normalized = inputName.trim().toLowerCase();
+  const normalized = canonicalizeMemberName(inputName).trim().toLowerCase();
   if (!normalized) return null;
   const members = await listMembers();
-  const matched = members.find((name) => name.toLowerCase() === normalized);
+  const matched = members.find((name) => name.toLowerCase() === normalized || namesMatch(name, normalized));
   return matched ?? null;
 }
 
 export async function createMember(memberName: string): Promise<string> {
-  const normalized = memberName.trim();
+  const normalized = canonicalizeMemberName(memberName);
   if (!normalized) throw new Error("Member name is required");
   await ensureMember(normalized);
   return normalized;
@@ -318,7 +324,7 @@ export async function upsertMemberProfile(input: {
   email?: string | null;
   role?: string | null;
 }) {
-  const name = input.name.trim();
+  const name = canonicalizeMemberName(input.name);
   if (!name) throw new Error("Member name is required");
   const email = input.email?.trim() || null;
   const role = input.role?.trim() || "member";

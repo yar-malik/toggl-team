@@ -9,6 +9,7 @@ import {
 } from "@/lib/toggl";
 import { persistHistoricalError, persistHistoricalSnapshot } from "@/lib/historyStore";
 import { getQuotaLockState, setQuotaLock } from "@/lib/quotaLockStore";
+import { canonicalizeMemberName, expandMemberAliases } from "@/lib/memberNames";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -79,8 +80,9 @@ async function readStoredTeam(
   if (members.length === 0) return { members: [], cachedAt: new Date().toISOString() };
 
   const base = process.env.SUPABASE_URL!;
-  const quotedMembers = members
-    .map((member) => `"${member.name.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`)
+  const memberNames = Array.from(new Set(members.flatMap((member) => expandMemberAliases(member.name))));
+  const quotedMembers = memberNames
+    .map((member) => `"${member.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`)
     .join(",");
   const memberFilter = `in.(${quotedMembers})`;
   const url =
@@ -133,7 +135,7 @@ async function readStoredTeam(
     ) {
       latestSyncedAt = syncedAt;
     }
-    const bucket = grouped.get(row.member_name);
+    const bucket = grouped.get(canonicalizeMemberName(row.member_name));
     if (!bucket) continue;
     const entry = {
       id: row.toggl_entry_id,

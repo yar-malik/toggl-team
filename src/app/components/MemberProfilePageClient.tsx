@@ -117,7 +117,7 @@ export default function MemberProfilePageClient({
 
   return (
     <div className="space-y-4">
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-rose-50/40 p-5 shadow-sm">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Member details</p>
@@ -140,19 +140,19 @@ export default function MemberProfilePageClient({
       </section>
 
       <section className="grid gap-3 md:grid-cols-4">
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
+        <div className="rounded-xl border border-slate-200 bg-rose-50/40 p-4">
           <p className="text-xs uppercase tracking-wide text-slate-500">Total</p>
           <p className="mt-1 text-xl font-semibold text-slate-900">{stats.total}</p>
         </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
+        <div className="rounded-xl border border-slate-200 bg-sky-50/50 p-4">
           <p className="text-xs uppercase tracking-wide text-slate-500">Entries</p>
           <p className="mt-1 text-xl font-semibold text-slate-900">{stats.count}</p>
         </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
+        <div className="rounded-xl border border-slate-200 bg-emerald-50/50 p-4">
           <p className="text-xs uppercase tracking-wide text-slate-500">Avg/entry</p>
           <p className="mt-1 text-xl font-semibold text-slate-900">{stats.avgEntry}</p>
         </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
+        <div className="rounded-xl border border-slate-200 bg-amber-50/60 p-4">
           <p className="text-xs uppercase tracking-wide text-slate-500">Active days</p>
           <p className="mt-1 text-xl font-semibold text-slate-900">{stats.activeDays}</p>
         </div>

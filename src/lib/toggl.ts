@@ -1,4 +1,5 @@
 import "server-only";
+import { canonicalizeMemberName, namesMatch } from "@/lib/memberNames";
 
 export type TeamMember = {
   name: string;
@@ -43,7 +44,7 @@ function parseTeamEnv(): TeamMember[] {
 
     return parsed
       .filter((item) => item && typeof item.name === "string" && typeof item.token === "string")
-      .map((item) => ({ name: item.name.trim(), token: item.token.trim() }))
+      .map((item) => ({ name: canonicalizeMemberName(item.name), token: item.token.trim() }))
       .filter((item) => item.name.length > 0 && item.token.length > 0);
   } catch {
     return [];
@@ -51,12 +52,18 @@ function parseTeamEnv(): TeamMember[] {
 }
 
 export function getTeamMembers(): { name: string }[] {
-  return parseTeamEnv().map((member) => ({ name: member.name }));
+  const unique = new Map<string, { name: string }>();
+  for (const member of parseTeamEnv()) {
+    if (!unique.has(member.name.toLowerCase())) {
+      unique.set(member.name.toLowerCase(), { name: member.name });
+    }
+  }
+  return Array.from(unique.values());
 }
 
 export function getTokenForMember(name: string): string | null {
   const team = parseTeamEnv();
-  const member = team.find((item) => item.name.toLowerCase() === name.toLowerCase());
+  const member = team.find((item) => namesMatch(item.name, name));
   return member?.token ?? null;
 }
 

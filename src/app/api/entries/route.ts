@@ -10,6 +10,7 @@ import {
 } from "@/lib/toggl";
 import { persistHistoricalError, persistHistoricalSnapshot } from "@/lib/historyStore";
 import { getQuotaLockState, setQuotaLock } from "@/lib/quotaLockStore";
+import { canonicalizeMemberName, namesMatch } from "@/lib/memberNames";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -158,17 +159,18 @@ async function readStoredEntries(member: string, startIso: string, endIso: strin
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const member = searchParams.get("member");
+  const memberParam = searchParams.get("member");
   const dateParam = searchParams.get("date");
   const forceRefresh = searchParams.get("refresh") === "1";
   const tzOffsetMinutes = parseTzOffsetMinutes(searchParams.get("tzOffset"));
 
-  if (!member) {
+  if (!memberParam) {
     return NextResponse.json({ error: "Missing member" }, { status: 400 });
   }
+  const member = canonicalizeMemberName(memberParam);
 
   const members = getTeamMembers();
-  if (!members.some((item) => item.name.toLowerCase() === member.toLowerCase())) {
+  if (!members.some((item) => namesMatch(item.name, member))) {
     return NextResponse.json({ error: "Unknown member" }, { status: 404 });
   }
 
