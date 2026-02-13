@@ -140,16 +140,7 @@ function buildCalendarBlock(entry: TimeEntry, dayStartMs: number) {
 function projectColorClass(project: string) {
   const key = project.trim().toLowerCase();
   if (key === "no project") return "border-slate-200 bg-slate-100";
-  const palette = [
-    "border-amber-200 bg-amber-100/70",
-    "border-teal-200 bg-teal-100/70",
-    "border-sky-200 bg-sky-100/70",
-    "border-rose-200 bg-rose-100/70",
-    "border-violet-200 bg-violet-100/70",
-  ];
-  let hash = 0;
-  for (let i = 0; i < key.length; i += 1) hash = (hash * 31 + key.charCodeAt(i)) | 0;
-  return palette[Math.abs(hash) % palette.length];
+  return "border-sky-200 bg-sky-100/70";
 }
 
 export default function TrackPageClient({ memberName }: { memberName: string }) {
@@ -297,7 +288,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               placeholder="What are you working on?"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xl font-semibold text-slate-900 outline-none focus:border-fuchsia-400"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xl font-semibold text-slate-900 outline-none focus:border-sky-400"
             />
           </div>
           <div className="flex items-center gap-2">
@@ -307,7 +298,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
               onChange={(event) => setProjectName(event.target.value)}
               placeholder="Project"
               list="project-list"
-              className="w-[180px] rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900"
+              className="w-[180px] rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-900"
             />
             <datalist id="project-list">
               {projects.map((project) => (
@@ -350,7 +341,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
                   setBusy(false);
                 }
               }}
-              className="h-12 w-12 rounded-full bg-fuchsia-600 text-lg font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+              className="h-12 w-12 rounded-full bg-blue-700 text-lg font-bold text-white shadow-sm transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300"
               title="Start timer"
             >
               ▶
@@ -378,7 +369,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
                   setBusy(false);
                 }
               }}
-              className="h-12 w-12 rounded-full bg-rose-500 text-lg font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+              className="h-12 w-12 rounded-full bg-sky-700 text-lg font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
               title="Stop timer"
             >
               ■
@@ -433,7 +424,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
                 type="button"
                 onClick={() => setDate(day.value)}
                 className={`rounded-md px-2 py-1 text-xs font-medium ${
-                  day.value === date ? "bg-fuchsia-100 text-fuchsia-800" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  day.value === date ? "bg-sky-100 text-sky-800" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                 }`}
                 title={day.label}
               >
@@ -444,7 +435,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
 
           <p className="ml-auto text-sm font-semibold text-slate-700">WEEK TOTAL {formatDurationShort(weekTotalSeconds)}</p>
           <div className="flex overflow-hidden rounded-md border border-slate-300">
-            <span className="bg-fuchsia-100 px-3 py-1 text-sm font-medium text-fuchsia-800">Calendar</span>
+            <span className="bg-sky-100 px-3 py-1 text-sm font-medium text-sky-800">Calendar</span>
             <span className="px-3 py-1 text-sm text-slate-700">List view</span>
             <span className="px-3 py-1 text-sm text-slate-700">Timesheet</span>
           </div>
@@ -555,7 +546,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
               ))}
 
               {nowMarkerTop !== null && (
-                <div className="pointer-events-none absolute left-24 right-0 border-t-2 border-fuchsia-500" style={{ top: `${nowMarkerTop}px` }} />
+                <div className="pointer-events-none absolute left-24 right-0 border-t-2 border-sky-500" style={{ top: `${nowMarkerTop}px` }} />
               )}
             </div>
           </div>
@@ -573,8 +564,8 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4">
           <div className="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
             <div className="flex items-center justify-between">
-              <div className="inline-flex items-center gap-2 rounded-full bg-fuchsia-100 px-3 py-1 text-sm font-medium text-fuchsia-800">
-                <span className="inline-flex h-2.5 w-2.5 rounded-full bg-fuchsia-500" />
+              <div className="inline-flex items-center gap-2 rounded-full bg-sky-100 px-3 py-1 text-sm font-medium text-sky-800">
+                <span className="inline-flex h-2.5 w-2.5 rounded-full bg-sky-500" />
                 Edit time entry
               </div>
               <button type="button" onClick={() => setEntryEditor(null)} className="text-3xl leading-none text-slate-500">
@@ -598,7 +589,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
                   onChange={(event) => setEntryEditor((prev) => (prev ? { ...prev, project: event.target.value } : prev))}
                   placeholder="Project"
                   list="project-list"
-                  className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xl text-amber-900"
+                  className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xl text-sky-900"
                 />
 
                 <div className="flex items-center gap-2">
@@ -659,7 +650,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
                       }));
                     }
                   }}
-                  className="ml-auto rounded-xl bg-fuchsia-600 px-8 py-3 text-2xl font-semibold text-white disabled:bg-slate-300"
+                  className="ml-auto rounded-xl bg-sky-600 px-8 py-3 text-2xl font-semibold text-white disabled:bg-slate-300"
                 >
                   {entryEditor.saving ? "Saving..." : "Save"}
                 </button>

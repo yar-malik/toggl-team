@@ -238,8 +238,8 @@ export default function PlatformShell({
                   {isRunning ? (
                     <span className="inline-flex items-center gap-2">
                       <span className="relative inline-flex h-2.5 w-2.5">
-                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                        <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75" />
+                        <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-sky-500" />
                       </span>
                       <ClockIcon className={iconClass()} />
                       <span className="tabular-nums">{runningLabel}</span>
