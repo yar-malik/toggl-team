@@ -15,6 +15,7 @@ type StoredEntry = {
   duration: number;
   tags: string[];
   project_name: string | null;
+  project_color: string | null;
 };
 
 type EntriesPayload = {
@@ -92,33 +93,43 @@ async function readStoredEntries(member: string, startIso: string, endIso: strin
   const projectKeys = Array.from(
     new Set(rows.map((row) => row.project_key).filter((value): value is string => typeof value === "string" && value.length > 0))
   );
-  const projectNameByKey = new Map<string, string>();
+  const projectMetaByKey = new Map<string, { name: string; color: string | null }>();
   if (projectKeys.length > 0) {
     const projectFilter = `in.(${projectKeys.map((key) => `"${key.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")})`;
-    const projectsUrl = `${base}/rest/v1/projects?select=project_key,project_name&project_key=${encodeURIComponent(projectFilter)}`;
+    const projectsUrl =
+      `${base}/rest/v1/projects?select=project_key,project_name,project_color` +
+      `&project_key=${encodeURIComponent(projectFilter)}`;
     const projectsResponse = await fetch(projectsUrl, {
       method: "GET",
       headers: supabaseHeaders(),
       cache: "no-store",
     });
     if (projectsResponse.ok) {
-      const projectRows = (await projectsResponse.json()) as Array<{ project_key: string; project_name: string }>;
+      const projectRows = (await projectsResponse.json()) as Array<{
+        project_key: string;
+        project_name: string;
+        project_color?: string | null;
+      }>;
       for (const row of projectRows) {
         if (!row.project_key) continue;
-        projectNameByKey.set(row.project_key, row.project_name);
+        projectMetaByKey.set(row.project_key, { name: row.project_name, color: row.project_color ?? null });
       }
     }
   }
 
-  const entries: StoredEntry[] = rows.map((row) => ({
-    id: row.toggl_entry_id,
-    description: row.description,
-    start: row.start_at,
-    stop: row.stop_at,
-    duration: row.duration_seconds,
-    tags: row.tags ?? [],
-    project_name: row.project_key ? projectNameByKey.get(row.project_key) ?? null : null,
-  }));
+  const entries: StoredEntry[] = rows.map((row) => {
+    const projectMeta = row.project_key ? projectMetaByKey.get(row.project_key) : null;
+    return {
+      id: row.toggl_entry_id,
+      description: row.description,
+      start: row.start_at,
+      stop: row.stop_at,
+      duration: row.duration_seconds,
+      tags: row.tags ?? [],
+      project_name: projectMeta?.name ?? null,
+      project_color: projectMeta?.color ?? null,
+    };
+  });
 
   const current =
     rows
@@ -131,7 +142,8 @@ async function readStoredEntries(member: string, startIso: string, endIso: strin
         stop: row.stop_at,
         duration: row.duration_seconds,
         tags: row.tags ?? [],
-        project_name: row.project_key ? projectNameByKey.get(row.project_key) ?? null : null,
+        project_name: row.project_key ? projectMetaByKey.get(row.project_key)?.name ?? null : null,
+        project_color: row.project_key ? projectMetaByKey.get(row.project_key)?.color ?? null : null,
       }))[0] ?? null;
 
   const totalSeconds = entries.reduce((acc, entry) => acc + Math.max(0, entry.duration), 0);

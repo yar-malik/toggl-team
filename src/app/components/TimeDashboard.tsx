@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 
 type Member = { name: string };
 
@@ -13,6 +13,7 @@ type TimeEntry = {
   duration: number;
   project_id?: number | null;
   project_name?: string | null;
+  project_color?: string | null;
   tags?: string[] | null;
 };
 
@@ -146,6 +147,7 @@ type TimelineBlock = {
   heightPx: number;
   title: string;
   project: string;
+  projectColor: string | null;
   timeRange: string;
   durationLabel: string;
 };
@@ -217,6 +219,7 @@ function buildTimelineBlocks(entries: TimeEntry[], dateInput: string) {
       heightPx,
       title: entry.description?.trim() || "(No description)",
       project: entry.project_name?.trim() || "No project",
+      projectColor: entry.project_color?.trim() || null,
       timeRange: `${formatTime(entry.start)} → ${formatTime(entry.stop)}`,
       durationLabel: formatDuration(getEntrySeconds(entry)),
     });
@@ -304,28 +307,47 @@ function getMemberPageHref(memberName: string, date: string) {
   return `/member/${encodeURIComponent(memberName)}?date=${encodeURIComponent(date)}`;
 }
 
-function getProjectColorClass(project: string): string {
-  if (!project || project === "No project") {
-    return "border-slate-300 bg-slate-100/90";
+function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  const normalized = hex.trim();
+  if (!/^#[0-9a-fA-F]{6}$/.test(normalized)) return null;
+  const r = Number.parseInt(normalized.slice(1, 3), 16);
+  const g = Number.parseInt(normalized.slice(3, 5), 16);
+  const b = Number.parseInt(normalized.slice(5, 7), 16);
+  return { r, g, b };
+}
+
+function getProjectBlockStyle(project: string, projectColor: string | null | undefined): CSSProperties {
+  const rgb = projectColor ? hexToRgb(projectColor) : null;
+  if (rgb) {
+    return {
+      borderColor: `rgb(${rgb.r} ${rgb.g} ${rgb.b} / 0.9)`,
+      backgroundColor: `rgb(${rgb.r} ${rgb.g} ${rgb.b} / 0.24)`,
+    };
   }
 
-  const palette = [
-    "border-rose-300 bg-rose-100/90",
-    "border-amber-300 bg-amber-100/90",
-    "border-emerald-300 bg-emerald-100/90",
-    "border-cyan-300 bg-cyan-100/90",
-    "border-sky-300 bg-sky-100/90",
-    "border-indigo-300 bg-indigo-100/90",
-    "border-lime-300 bg-lime-100/90",
-    "border-orange-300 bg-orange-100/90",
-    "border-teal-300 bg-teal-100/90",
+  if (!project || project === "No project") {
+    return {
+      borderColor: "rgb(148 163 184 / 0.8)",
+      backgroundColor: "rgb(241 245 249 / 0.9)",
+    };
+  }
+
+  const fallback = [
+    { border: "rgb(244 63 94 / 0.8)", bg: "rgb(254 205 211 / 0.7)" },
+    { border: "rgb(245 158 11 / 0.8)", bg: "rgb(254 243 199 / 0.75)" },
+    { border: "rgb(16 185 129 / 0.8)", bg: "rgb(209 250 229 / 0.75)" },
+    { border: "rgb(6 182 212 / 0.8)", bg: "rgb(207 250 254 / 0.75)" },
+    { border: "rgb(14 165 233 / 0.8)", bg: "rgb(224 242 254 / 0.75)" },
+    { border: "rgb(99 102 241 / 0.8)", bg: "rgb(224 231 255 / 0.75)" },
+    { border: "rgb(132 204 22 / 0.8)", bg: "rgb(236 252 203 / 0.75)" },
   ];
 
   let hash = 0;
   for (let i = 0; i < project.length; i += 1) {
     hash = (hash * 31 + project.charCodeAt(i)) >>> 0;
   }
-  return palette[hash % palette.length];
+  const color = fallback[hash % fallback.length];
+  return { borderColor: color.border, backgroundColor: color.bg };
 }
 
 function buildSummary(entries: TimeEntry[]) {
@@ -910,17 +932,18 @@ export default function TimeDashboard({
 
                       {timeline.blocks.map((block) => {
                         const sourceEntry = data.entries.find((entry) => `${entry.id}-${new Date(entry.start).getTime()}` === block.id);
-                        const colorClass = getProjectColorClass(block.project);
+                        const blockStyle = getProjectBlockStyle(block.project, block.projectColor);
                         return (
                         <button
                           key={block.id}
                           type="button"
-                          className={`absolute overflow-hidden rounded-lg border px-2 py-1 text-left shadow-sm ${colorClass}`}
+                          className="absolute overflow-hidden rounded-lg border px-2 py-1 text-left shadow-sm"
                           style={{
                             top: `${block.topPx}px`,
                             height: `${block.heightPx}px`,
                             left: `calc(${(block.lane / timeline.maxLanes) * 100}% + 0.25rem)`,
                             width: `calc(${100 / timeline.maxLanes}% - 0.5rem)`,
+                            ...blockStyle,
                           }}
                           title={sourceEntry ? getEntryTooltipText(sourceEntry, member) : undefined}
                           onMouseEnter={(event) => {
@@ -1279,17 +1302,18 @@ export default function TimeDashboard({
                             ?.entries.find(
                               (entry) => `${entry.id}-${new Date(entry.start).getTime()}` === block.id
                             );
-                          const colorClass = getProjectColorClass(block.project);
+                          const blockStyle = getProjectBlockStyle(block.project, block.projectColor);
                           return (
                             <button
                               key={block.id}
                               type="button"
-                              className={`absolute overflow-hidden rounded-lg border px-2 py-1 text-left shadow-sm ${colorClass}`}
+                              className="absolute overflow-hidden rounded-lg border px-2 py-1 text-left shadow-sm"
                               style={{
                                 top: `${block.topPx}px`,
                                 height: `${block.heightPx}px`,
                                 left: `calc(${(block.lane / memberTimeline.maxLanes) * 100}% + 0.25rem)`,
                                 width: `calc(${100 / memberTimeline.maxLanes}% - 0.5rem)`,
+                                ...blockStyle,
                               }}
                               title={sourceEntry ? getEntryTooltipText(sourceEntry, memberTimeline.name) : undefined}
                               onMouseEnter={(event) => {

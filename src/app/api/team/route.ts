@@ -15,6 +15,7 @@ type TimeEntry = {
   duration: number;
   tags: string[];
   project_name: string | null;
+  project_color: string | null;
 };
 
 type MemberPayload = {
@@ -102,20 +103,26 @@ async function readStoredTeam(
   const projectKeys = Array.from(
     new Set(rows.map((row) => row.project_key).filter((value): value is string => typeof value === "string" && value.length > 0))
   );
-  const projectNameByKey = new Map<string, string>();
+  const projectMetaByKey = new Map<string, { name: string; color: string | null }>();
   if (projectKeys.length > 0) {
     const projectFilter = `in.(${projectKeys.map((key) => `"${key.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")})`;
-    const projectsUrl = `${base}/rest/v1/projects?select=project_key,project_name&project_key=${encodeURIComponent(projectFilter)}`;
+    const projectsUrl =
+      `${base}/rest/v1/projects?select=project_key,project_name,project_color` +
+      `&project_key=${encodeURIComponent(projectFilter)}`;
     const projectsResponse = await fetch(projectsUrl, {
       method: "GET",
       headers: supabaseHeaders(),
       cache: "no-store",
     });
     if (projectsResponse.ok) {
-      const projectRows = (await projectsResponse.json()) as Array<{ project_key: string; project_name: string }>;
+      const projectRows = (await projectsResponse.json()) as Array<{
+        project_key: string;
+        project_name: string;
+        project_color?: string | null;
+      }>;
       for (const row of projectRows) {
         if (!row.project_key) continue;
-        projectNameByKey.set(row.project_key, row.project_name);
+        projectMetaByKey.set(row.project_key, { name: row.project_name, color: row.project_color ?? null });
       }
     }
   }
@@ -131,6 +138,7 @@ async function readStoredTeam(
     }
     const bucket = grouped.get(canonicalizeMemberName(row.member_name));
     if (!bucket) continue;
+    const projectMeta = row.project_key ? projectMetaByKey.get(row.project_key) : null;
     const entry: TimeEntry = {
       id: row.toggl_entry_id,
       description: row.description,
@@ -138,7 +146,8 @@ async function readStoredTeam(
       stop: row.stop_at,
       duration: row.duration_seconds,
       tags: row.tags ?? [],
-      project_name: row.project_key ? projectNameByKey.get(row.project_key) ?? null : null,
+      project_name: projectMeta?.name ?? null,
+      project_color: projectMeta?.color ?? null,
     };
     bucket.entries.push(entry);
     bucket.totalSeconds += Math.max(0, row.duration_seconds);
