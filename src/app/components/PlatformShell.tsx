@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import GlobalTimerBar from "@/app/components/GlobalTimerBar";
 
 type IconProps = { className?: string };
 
@@ -305,7 +306,10 @@ export default function PlatformShell({
           </button>
         </aside>
 
-        <main className="min-w-0 flex-1">{children}</main>
+        <main className="min-w-0 flex-1">
+          <GlobalTimerBar memberName={currentMemberName} />
+          {children}
+        </main>
       </div>
     </div>
   );
