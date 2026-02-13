@@ -170,10 +170,10 @@ function buildWeekDays(dateInput: string) {
   });
 }
 
-function buildCalendarBlock(entry: TimeEntry, dayStartMs: number, hourHeight: number) {
+function buildCalendarBlock(entry: TimeEntry, dayStartMs: number, hourHeight: number, nowMs: number) {
   const startMs = new Date(entry.start).getTime();
   if (Number.isNaN(startMs)) return null;
-  const stopMs = entry.stop ? new Date(entry.stop).getTime() : startMs + Math.max(0, entry.duration) * 1000;
+  const stopMs = entry.stop ? new Date(entry.stop).getTime() : nowMs;
   const safeStopMs = Number.isNaN(stopMs) ? startMs + Math.max(0, entry.duration) * 1000 : stopMs;
   const minutesFromStart = (startMs - dayStartMs) / (60 * 1000);
   const durationMinutes = Math.max(MIN_ENTRY_MINUTES, (safeStopMs - startMs) / (60 * 1000));
@@ -543,11 +543,11 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
   const dayStartMs = useMemo(() => new Date(`${date}T00:00:00`).getTime(), [date]);
   const calendarBlocks = useMemo(() => {
     const blocks = (entries?.entries ?? [])
-      .map((entry) => buildCalendarBlock(entry, dayStartMs, hourHeight))
+      .map((entry) => buildCalendarBlock(entry, dayStartMs, hourHeight, nowMs))
       .filter((item): item is NonNullable<typeof item> => item !== null)
       .sort((a, b) => a.top - b.top);
     return layoutCalendarBlocks(blocks);
-  }, [entries?.entries, dayStartMs, hourHeight]);
+  }, [entries?.entries, dayStartMs, hourHeight, nowMs]);
 
   const nowMarkerTop = useMemo(() => {
     const selectedDay = new Date(`${date}T00:00:00`);
