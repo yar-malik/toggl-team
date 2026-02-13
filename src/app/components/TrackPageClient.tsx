@@ -275,22 +275,14 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
   const [error, setError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(0);
 
-  const [description, setDescription] = useState("");
-  const [projectName, setProjectName] = useState("");
-  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
-  const [projectSearch, setProjectSearch] = useState("");
   const [modalProjectPickerOpen, setModalProjectPickerOpen] = useState(false);
   const [modalProjectSearch, setModalProjectSearch] = useState("");
-  const [quickDurationInput, setQuickDurationInput] = useState("");
-  const [quickDurationMode, setQuickDurationMode] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(ZOOM_LEVELS.length - 1);
   const [calendarDraft, setCalendarDraft] = useState<CalendarDraft | null>(null);
   const [draftDurationMinutes, setDraftDurationMinutes] = useState("60");
   const [entryEditor, setEntryEditor] = useState<EntryEditorState | null>(null);
   const [blockDrag, setBlockDrag] = useState<BlockDragState | null>(null);
-  const projectPickerRef = useRef<HTMLDivElement | null>(null);
   const modalProjectPickerRef = useRef<HTMLDivElement | null>(null);
-  const latestLiveDraftRef = useRef<{ description: string; projectName: string }>({ description: "", projectName: "" });
   const hourHeight = ZOOM_LEVELS[zoomLevel];
 
   useEffect(() => {
@@ -308,34 +300,6 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
     const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
-
-  useEffect(() => {
-    if (!currentTimer) {
-      setQuickDurationMode(false);
-    }
-  }, [currentTimer]);
-
-  useEffect(() => {
-    latestLiveDraftRef.current = { description, projectName };
-  }, [description, projectName]);
-
-  useEffect(() => {
-    if (!projectPickerOpen) return;
-    const onPointerDown = (event: MouseEvent) => {
-      if (!projectPickerRef.current) return;
-      if (projectPickerRef.current.contains(event.target as Node)) return;
-      setProjectPickerOpen(false);
-    };
-    const onEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setProjectPickerOpen(false);
-    };
-    window.addEventListener("mousedown", onPointerDown);
-    window.addEventListener("keydown", onEscape);
-    return () => {
-      window.removeEventListener("mousedown", onPointerDown);
-      window.removeEventListener("keydown", onEscape);
-    };
-  }, [projectPickerOpen]);
 
   useEffect(() => {
     if (!modalProjectPickerOpen) return;
@@ -532,13 +496,6 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
     };
   }, [memberName, date, refreshTick]);
 
-  const runningSeconds = useMemo(() => {
-    if (!currentTimer) return 0;
-    const startedAtMs = new Date(currentTimer.startAt).getTime();
-    if (Number.isNaN(startedAtMs)) return Math.max(0, currentTimer.durationSeconds);
-    return Math.max(0, Math.floor((nowMs - startedAtMs) / 1000));
-  }, [currentTimer, nowMs]);
-
   const weekDays = useMemo(() => buildWeekDays(date), [date]);
   const dayStartMs = useMemo(() => new Date(`${date}T00:00:00`).getTime(), [date]);
   const calendarBlocks = useMemo(() => {
@@ -564,18 +521,6 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
   }, [date, hourHeight, nowMs]);
 
   const hours = useMemo(() => Array.from({ length: 24 }, (_, hour) => hour), []);
-  const filteredProjects = useMemo(() => {
-    const query = projectSearch.trim().toLowerCase();
-    const sorted = [...projects].sort((a, b) => a.name.localeCompare(b.name));
-    if (!query) return sorted;
-    return sorted.filter((project) => project.name.toLowerCase().includes(query));
-  }, [projectSearch, projects]);
-  const selectedProjectColor = useMemo(() => {
-    const normalized = projectName.trim().toLowerCase();
-    if (!normalized) return null;
-    const match = projects.find((project) => project.name.trim().toLowerCase() === normalized);
-    return match?.color ?? null;
-  }, [projectName, projects]);
   const filteredModalProjects = useMemo(() => {
     const query = modalProjectSearch.trim().toLowerCase();
     const sorted = [...projects].sort((a, b) => a.name.localeCompare(b.name));
@@ -587,297 +532,8 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
     window.dispatchEvent(new CustomEvent("voho-timer-changed", { detail }));
   }
 
-  function patchRunningEntryLocally(nextDescription: string, nextProjectName: string) {
-    if (!currentTimer) return;
-    setEntries((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        entries: prev.entries.map((entry) => {
-          if (entry.id !== currentTimer.id) return entry;
-          const nextProject = nextProjectName.trim() || null;
-          return {
-            ...entry,
-            description: nextDescription.trim() || null,
-            project_name: nextProject,
-          };
-        }),
-      };
-    });
-  }
-
-  useEffect(() => {
-    if (!currentTimer) return;
-
-    const handle = window.setTimeout(async () => {
-      const draft = latestLiveDraftRef.current;
-      try {
-        const res = await fetch("/api/time-entries/current", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            member: memberName,
-            description: draft.description,
-            project: draft.projectName,
-          }),
-        });
-        const data = (await res.json()) as {
-          error?: string;
-          current?: { id: number; description: string | null; projectName: string | null; startAt: string; durationSeconds: number } | null;
-        };
-        if (!res.ok || data.error) return;
-        if (data.current) {
-          setCurrentTimer(data.current);
-        }
-      } catch {
-        // Best-effort live sync; keep typing smooth.
-      }
-    }, 280);
-
-    return () => window.clearTimeout(handle);
-  }, [currentTimer, description, projectName, memberName]);
-
-  async function createQuickDurationEntry(rawDuration: string) {
-    const minutes = parseDurationInputToMinutes(rawDuration);
-    if (!minutes || minutes <= 0) {
-      throw new Error("Use a valid duration like 15m, 20 min, 1h 30m, or 1:15");
-    }
-    const now = new Date();
-    const startAt = new Date(now.getTime() - minutes * 60 * 1000).toISOString();
-
-    const res = await fetch("/api/time-entries/manual", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        member: memberName,
-        description,
-        project: projectName,
-        startAt,
-        durationMinutes: minutes,
-        tzOffset: new Date().getTimezoneOffset(),
-      }),
-    });
-    const data = (await res.json()) as { error?: string };
-    if (!res.ok || data.error) {
-      throw new Error(data.error || "Failed to add entry");
-    }
-    setQuickDurationInput("");
-    setRefreshTick((v) => v + 1);
-  }
-
-  async function handleQuickDurationSubmit() {
-    if (busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await createQuickDurationEntry(quickDurationInput);
-      setQuickDurationMode(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to add entry");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-200 px-5 py-4">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0 flex-1">
-            <input
-              type="text"
-              value={description}
-              onChange={(event) => {
-                const next = event.target.value;
-                setDescription(next);
-                patchRunningEntryLocally(next, projectName);
-              }}
-              placeholder="What are you working on?"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xl font-semibold text-slate-900 outline-none focus:border-sky-400"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="relative" ref={projectPickerRef}>
-              <button
-                type="button"
-                onClick={() => setProjectPickerOpen((open) => !open)}
-                className="inline-flex h-10 min-w-[190px] items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 text-sm font-semibold text-sky-900 shadow-sm transition hover:bg-sky-100"
-                title="Pick project"
-              >
-                <svg viewBox="0 0 24 24" className="h-4 w-4 text-sky-700" fill="currentColor" aria-hidden="true">
-                  <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3l1.5 1.5h8.5A2.5 2.5 0 0 1 21 9v9.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5z" />
-                </svg>
-                <span
-                  className="inline-block h-2.5 w-2.5 rounded-full"
-                  style={{ backgroundColor: getProjectBaseColor(projectName || "No project", selectedProjectColor) }}
-                />
-                <span className="max-w-[120px] truncate">{projectName || "No project"}</span>
-              </button>
-
-              {projectPickerOpen && (
-                <div className="absolute right-0 z-50 mt-2 w-[360px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_18px_48px_rgba(15,23,42,0.24)]">
-                  <div className="border-b border-slate-100 p-3">
-                    <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                      <svg viewBox="0 0 24 24" className="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                        <circle cx="11" cy="11" r="7" />
-                        <path d="m20 20-3.5-3.5" strokeLinecap="round" />
-                      </svg>
-                      <input
-                        type="text"
-                        value={projectSearch}
-                        onChange={(event) => setProjectSearch(event.target.value)}
-                        placeholder="Search by project"
-                        className="w-full bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
-                        autoFocus
-                      />
-                    </div>
-                  </div>
-
-                  <div className="max-h-[340px] overflow-y-auto p-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setProjectName("");
-                        setProjectPickerOpen(false);
-                      }}
-                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-slate-50"
-                    >
-                      <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
-                      <span className="text-sm font-medium text-slate-700">No project</span>
-                    </button>
-
-                    <p className="px-3 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Projects</p>
-                    {filteredProjects.length === 0 ? (
-                      <p className="px-3 py-4 text-sm text-slate-500">No matching project.</p>
-                    ) : (
-                      filteredProjects.map((project) => (
-                        <button
-                          key={project.key}
-                          type="button"
-                          onClick={() => {
-                              setProjectName(project.name);
-                              patchRunningEntryLocally(description, project.name);
-                              setProjectPickerOpen(false);
-                            }}
-                          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-slate-50"
-                        >
-                          <span
-                            className="h-2.5 w-2.5 rounded-full"
-                            style={{ backgroundColor: getProjectBaseColor(project.name, project.color) }}
-                          />
-                          <span className="truncate text-sm font-semibold text-slate-800">{project.name}</span>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {!currentTimer || quickDurationMode ? (
-              <input
-                type="text"
-                value={quickDurationInput}
-                onChange={(event) => setQuickDurationInput(event.target.value)}
-                onKeyDown={async (event) => {
-                  if (event.key !== "Enter") return;
-                  event.preventDefault();
-                  await handleQuickDurationSubmit();
-                }}
-                onBlur={() => {
-                  if (currentTimer) setQuickDurationMode(false);
-                }}
-                autoFocus={quickDurationMode}
-                placeholder="0:00:00"
-                className="w-[110px] rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-right text-2xl font-semibold tabular-nums text-slate-900 outline-none focus:border-sky-400"
-                title="Type duration: 15m, 20 min, 1h 30m, 1:15, or 90"
-              />
-            ) : (
-              <button
-                type="button"
-                onClick={() => setQuickDurationMode(true)}
-                className="min-w-[95px] text-right text-3xl font-semibold tabular-nums text-slate-900 transition hover:text-[#0BA5E9]"
-                title="Click to type duration like 15m or 1h 20m"
-              >
-                {formatTimer(runningSeconds)}
-              </button>
-            )}
-
-            <button
-              type="button"
-              disabled={busy || Boolean(currentTimer)}
-              onClick={async () => {
-                setBusy(true);
-                setError(null);
-                try {
-                  const smartDuration = parseDurationInputToMinutes(quickDurationInput);
-                  if (smartDuration && smartDuration > 0) {
-                    await createQuickDurationEntry(quickDurationInput);
-                    return;
-                  }
-                  const res = await fetch("/api/time-entries/start", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ member: memberName, description, project: projectName, tzOffset: new Date().getTimezoneOffset() }),
-                  });
-                  const data = (await res.json()) as {
-                    error?: string;
-                    current?: { id: number; description: string | null; projectName: string | null; startAt: string; durationSeconds: number } | null;
-                  };
-                  if (!res.ok || data.error) throw new Error(data.error || "Failed to start timer");
-                  if (data.current) {
-                    setCurrentTimer(data.current);
-                    emitTimerChanged({
-                      memberName,
-                      isRunning: true,
-                      startAt: data.current.startAt,
-                      durationSeconds: data.current.durationSeconds,
-                    });
-                  }
-                  setRefreshTick((v) => v + 1);
-                } catch (err) {
-                  setError(err instanceof Error ? err.message : "Failed to start timer");
-                } finally {
-                  setBusy(false);
-                }
-              }}
-              className="h-12 w-12 rounded-full bg-[#0BA5E9] text-lg font-bold text-white shadow-sm transition hover:bg-[#0994cf] disabled:cursor-not-allowed disabled:bg-slate-300"
-              title="Start timer"
-            >
-              ▶
-            </button>
-            <button
-              type="button"
-              disabled={busy || !currentTimer}
-              onClick={async () => {
-                setBusy(true);
-                setError(null);
-                try {
-                  const res = await fetch("/api/time-entries/stop", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ member: memberName, tzOffset: new Date().getTimezoneOffset() }),
-                  });
-                  const data = (await res.json()) as { error?: string };
-                  if (!res.ok || data.error) throw new Error(data.error || "Failed to stop timer");
-                  setCurrentTimer(null);
-                  emitTimerChanged({ memberName, isRunning: false, startAt: null, durationSeconds: 0 });
-                  setRefreshTick((v) => v + 1);
-                } catch (err) {
-                  setError(err instanceof Error ? err.message : "Failed to stop timer");
-                } finally {
-                  setBusy(false);
-                }
-              }}
-              className="h-12 w-12 rounded-full bg-[#0BA5E9] text-lg font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
-              title="Stop timer"
-            >
-              ■
-            </button>
-          </div>
-        </div>
-      </div>
-
       <div className="border-b border-slate-200 px-5 py-3">
         <div className="flex flex-wrap items-center gap-3">
           <button
