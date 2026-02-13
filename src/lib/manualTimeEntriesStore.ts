@@ -218,7 +218,7 @@ export async function listProjects(): Promise<StoredProject[]> {
   return Array.from(canonical.values()).sort((a, b) => a.project_name.localeCompare(b.project_name));
 }
 
-export async function createProject(projectName: string) {
+export async function createProject(projectName: string, projectColor?: string | null) {
   const normalized = normalizeProjectName(projectName);
   if (!normalized) {
     throw new Error("Project name is required");
@@ -227,10 +227,23 @@ export async function createProject(projectName: string) {
   if (!projectKey || !savedName) {
     throw new Error("Failed to save project");
   }
+  let finalColor = "#0EA5E9";
+  if (typeof projectColor === "string") {
+    const normalizedColor = projectColor.trim().toUpperCase();
+    if (!/^#[0-9A-F]{6}$/.test(normalizedColor)) {
+      throw new Error("Invalid project color");
+    }
+    if (normalizedColor !== finalColor) {
+      const updated = await updateProject({ key: projectKey, color: normalizedColor });
+      finalColor = updated.projectColor;
+    } else {
+      finalColor = normalizedColor;
+    }
+  }
   return {
     projectKey,
     projectName: savedName,
-    projectColor: "#0EA5E9",
+    projectColor: finalColor,
   };
 }
 

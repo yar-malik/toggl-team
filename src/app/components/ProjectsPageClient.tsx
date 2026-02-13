@@ -217,7 +217,6 @@ export default function ProjectsPageClient({ initialProjects }: { initialProject
                       setEditing({ key: project.key, name: project.name, color: project.color || "#0EA5E9" });
                     }}
                     aria-label={`Edit ${project.name}`}
-                    onClick={() => setEditing({ key: project.key, name: project.name, color: project.color || "#0EA5E9" })}
                     className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
                   >
                     Edit

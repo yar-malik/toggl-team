@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
 
   try {
     await requireAdminOrThrow();
-    const project = await createProject(name);
+    const project = await createProject(name, body.color ?? null);
     return NextResponse.json({
       ok: true,
       project: {
