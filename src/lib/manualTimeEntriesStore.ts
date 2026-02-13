@@ -30,6 +30,13 @@ type EnsureProjectResult = {
   projectName: string | null;
 };
 
+export type StoredProject = {
+  project_key: string;
+  workspace_id: number;
+  project_id: number;
+  project_name: string;
+};
+
 function isSupabaseConfigured() {
   return Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
 }
@@ -117,6 +124,35 @@ async function ensureManualProject(projectName: string | null): Promise<EnsurePr
     throw new Error("Failed to save project");
   }
   return { projectKey, projectName: normalized };
+}
+
+export async function listProjects(): Promise<StoredProject[]> {
+  if (!isSupabaseConfigured()) return [];
+  const url = `${getBaseUrl()}/rest/v1/projects?select=project_key,workspace_id,project_id,project_name&order=project_name.asc`;
+  const response = await fetch(url, {
+    method: "GET",
+    headers: supabaseHeaders(),
+    cache: "no-store",
+  });
+  if (!response.ok) return [];
+  const rows = (await response.json()) as StoredProject[];
+  if (!Array.isArray(rows)) return [];
+  return rows;
+}
+
+export async function createProject(projectName: string) {
+  const normalized = normalizeProjectName(projectName);
+  if (!normalized) {
+    throw new Error("Project name is required");
+  }
+  const { projectKey, projectName: savedName } = await ensureManualProject(normalized);
+  if (!projectKey || !savedName) {
+    throw new Error("Failed to save project");
+  }
+  return {
+    projectKey,
+    projectName: savedName,
+  };
 }
 
 async function ensureMember(memberName: string) {
