@@ -788,7 +788,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
                   if (currentTimer) setQuickDurationMode(false);
                 }}
                 autoFocus={quickDurationMode}
-                placeholder="15m"
+                placeholder="0:00:00"
                 className="w-[110px] rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-right text-2xl font-semibold tabular-nums text-slate-900 outline-none focus:border-sky-400"
                 title="Type duration: 15m, 20 min, 1h 30m, 1:15, or 90"
               />
