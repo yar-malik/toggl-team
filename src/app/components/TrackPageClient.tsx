@@ -29,6 +29,14 @@ type CurrentTimerResponse = {
   error?: string;
 };
 
+type MemberWeekResponse = {
+  members: Array<{
+    name: string;
+    totalSeconds: number;
+  }>;
+  error?: string;
+};
+
 type ProjectItem = { key: string; name: string; source: "manual" | "external" };
 type ProjectsResponse = { projects: ProjectItem[]; error?: string };
 
@@ -36,12 +44,18 @@ type CalendarDraft = { hour: number; minute: number };
 
 const CALENDAR_HOUR_HEIGHT = 56;
 
-function formatDuration(totalSeconds: number): string {
+function formatTimer(totalSeconds: number): string {
+  const safe = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(safe / 3600);
+  const m = Math.floor((safe % 3600) / 60);
+  const s = safe % 60;
+  return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+function formatDurationShort(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  return `${minutes}m ${seconds}s`;
+  return `${hours}h ${minutes}m`;
 }
 
 function formatClock(iso: string | null | undefined): string {
@@ -55,6 +69,28 @@ function buildLocalDateTimeIso(dateInput: string, hour: number, minute: number):
   const hh = String(hour).padStart(2, "0");
   const mm = String(minute).padStart(2, "0");
   return new Date(`${dateInput}T${hh}:${mm}:00`).toISOString();
+}
+
+function startOfWeekMonday(dateInput: string): Date {
+  const date = new Date(`${dateInput}T00:00:00`);
+  const day = date.getDay();
+  const diff = (day + 6) % 7;
+  date.setDate(date.getDate() - diff);
+  return date;
+}
+
+function buildWeekDays(dateInput: string) {
+  const start = startOfWeekMonday(dateInput);
+  return Array.from({ length: 7 }, (_, idx) => {
+    const d = new Date(start);
+    d.setDate(start.getDate() + idx);
+    const value = d.toISOString().slice(0, 10);
+    return {
+      value,
+      short: d.toLocaleDateString([], { weekday: "short" }),
+      label: d.toLocaleDateString([], { weekday: "short", day: "2-digit", month: "short" }),
+    };
+  });
 }
 
 function buildCalendarBlock(entry: TimeEntry, dayStartMs: number) {
@@ -74,19 +110,34 @@ function buildCalendarBlock(entry: TimeEntry, dayStartMs: number) {
   };
 }
 
+function projectColorClass(project: string) {
+  const key = project.trim().toLowerCase();
+  if (key === "no project") return "border-slate-200 bg-slate-100";
+  const palette = [
+    "border-amber-200 bg-amber-100/70",
+    "border-teal-200 bg-teal-100/70",
+    "border-sky-200 bg-sky-100/70",
+    "border-rose-200 bg-rose-100/70",
+    "border-violet-200 bg-violet-100/70",
+  ];
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) hash = (hash * 31 + key.charCodeAt(i)) | 0;
+  return palette[Math.abs(hash) % palette.length];
+}
+
 export default function TrackPageClient({ memberName }: { memberName: string }) {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [refreshTick, setRefreshTick] = useState(0);
   const [entries, setEntries] = useState<EntriesResponse | null>(null);
   const [currentTimer, setCurrentTimer] = useState<CurrentTimerResponse["current"]>(null);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
+  const [weekTotalSeconds, setWeekTotalSeconds] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(Date.now());
 
   const [description, setDescription] = useState("");
   const [projectName, setProjectName] = useState("");
-  const [newProjectName, setNewProjectName] = useState("");
   const [calendarDraft, setCalendarDraft] = useState<CalendarDraft | null>(null);
   const [draftDurationMinutes, setDraftDurationMinutes] = useState("60");
 
@@ -122,12 +173,20 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
         if (!res.ok || data.error) throw new Error(data.error || "Failed to load projects");
         return data;
       }),
+      fetch(`/api/member-profiles?member=${encodeURIComponent(memberName)}&date=${encodeURIComponent(date)}&_req=${Date.now()}`, {
+        cache: "no-store",
+      }).then(async (res) => {
+        const data = (await res.json()) as MemberWeekResponse;
+        if (!res.ok || data.error) throw new Error(data.error || "Failed to load weekly summary");
+        return data;
+      }),
     ])
-      .then(([entriesData, timerData, projectsData]) => {
+      .then(([entriesData, timerData, projectsData, weekData]) => {
         if (!active) return;
         setEntries(entriesData);
         setCurrentTimer(timerData.current);
         setProjects(projectsData.projects);
+        setWeekTotalSeconds(weekData.members[0]?.totalSeconds ?? 0);
         setError(null);
       })
       .catch((err: Error) => {
@@ -147,6 +206,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
     return Math.max(0, Math.floor((nowMs - startedAtMs) / 1000));
   }, [currentTimer, nowMs]);
 
+  const weekDays = useMemo(() => buildWeekDays(date), [date]);
   const dayStartMs = useMemo(() => new Date(`${date}T00:00:00`).getTime(), [date]);
   const calendarBlocks = useMemo(() => {
     return (entries?.entries ?? [])
@@ -155,47 +215,52 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
       .sort((a, b) => a.top - b.top);
   }, [entries?.entries, dayStartMs]);
 
+  const nowMarkerTop = useMemo(() => {
+    const selectedDay = new Date(`${date}T00:00:00`);
+    const now = new Date(nowMs);
+    if (
+      selectedDay.getFullYear() !== now.getFullYear() ||
+      selectedDay.getMonth() !== now.getMonth() ||
+      selectedDay.getDate() !== now.getDate()
+    ) {
+      return null;
+    }
+    const minutes = now.getHours() * 60 + now.getMinutes();
+    return (minutes / 60) * CALENDAR_HOUR_HEIGHT;
+  }, [date, nowMs]);
+
   const hours = useMemo(() => Array.from({ length: 24 }, (_, hour) => hour), []);
 
   return (
-    <div className="space-y-4">
-      <section className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-violet-50/40 p-5 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Tracking</p>
-            <h1 className="text-2xl font-semibold text-slate-900">{memberName}</h1>
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-200 px-5 py-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <input
+              type="text"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="What are you working on?"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xl font-semibold text-slate-900 outline-none focus:border-fuchsia-400"
+            />
           </div>
-          <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-right">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Timer</p>
-            <p className="text-2xl font-semibold text-slate-900">{formatDuration(runningSeconds)}</p>
-            <p className="text-xs text-slate-500">{currentTimer ? "Running" : "Stopped"}</p>
-          </div>
-        </div>
-
-        <div className="mt-4 grid gap-3 lg:grid-cols-[1.1fr_1fr_auto]">
-          <input
-            type="text"
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            placeholder="What are you working on?"
-            className="rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900"
-          />
-          <div>
+          <div className="flex items-center gap-2">
             <input
               type="text"
               value={projectName}
               onChange={(event) => setProjectName(event.target.value)}
               placeholder="Project"
               list="project-list"
-              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900"
+              className="w-[180px] rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900"
             />
             <datalist id="project-list">
               {projects.map((project) => (
                 <option key={project.key} value={project.name} />
               ))}
             </datalist>
-          </div>
-          <div className="flex gap-2">
+
+            <p className="min-w-[95px] text-right text-3xl font-semibold tabular-nums text-slate-900">{formatTimer(runningSeconds)}</p>
+
             <button
               type="button"
               disabled={busy || Boolean(currentTimer)}
@@ -217,9 +282,10 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
                   setBusy(false);
                 }
               }}
-              className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+              className="h-12 w-12 rounded-full bg-fuchsia-600 text-lg font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+              title="Start timer"
             >
-              Start
+              ▶
             </button>
             <button
               type="button"
@@ -242,50 +308,98 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
                   setBusy(false);
                 }
               }}
-              className="rounded-xl bg-slate-700 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+              className="h-12 w-12 rounded-full bg-rose-500 text-lg font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+              title="Stop timer"
             >
-              Stop
+              ■
             </button>
           </div>
         </div>
+      </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-slate-600">
-          <label className="flex items-center gap-2">
-            <span>Date</span>
-            <input
-              type="date"
-              value={date}
-              onChange={(event) => setDate(event.target.value)}
-              className="rounded-lg border border-slate-300 px-2 py-1 text-sm text-slate-900"
-            />
-          </label>
-          {entries?.warning && <span className="rounded bg-amber-100 px-2 py-1 text-amber-800">{entries.warning}</span>}
-        </div>
-        {error && <p className="mt-2 rounded bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
-      </section>
+      <div className="border-b border-slate-200 px-5 py-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              const d = new Date(`${date}T00:00:00`);
+              d.setDate(d.getDate() - 1);
+              setDate(d.toISOString().slice(0, 10));
+            }}
+            className="rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-700"
+          >
+            ←
+          </button>
+          <button
+            type="button"
+            onClick={() => setDate(new Date().toISOString().slice(0, 10))}
+            className="rounded-md border border-slate-300 bg-slate-50 px-3 py-1 text-sm text-slate-700"
+          >
+            Today
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const d = new Date(`${date}T00:00:00`);
+              d.setDate(d.getDate() + 1);
+              setDate(d.toISOString().slice(0, 10));
+            }}
+            className="rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-700"
+          >
+            →
+          </button>
 
-      <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
-        <section className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-sky-50/40 p-5 shadow-sm">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-slate-900">Day Calendar</h2>
-            <p className="text-xs text-slate-500">Click hour rows to add entries.</p>
+          <input
+            type="date"
+            value={date}
+            onChange={(event) => setDate(event.target.value)}
+            className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+          />
+
+          <div className="ml-1 flex gap-1">
+            {weekDays.map((day) => (
+              <button
+                key={day.value}
+                type="button"
+                onClick={() => setDate(day.value)}
+                className={`rounded-md px-2 py-1 text-xs font-medium ${
+                  day.value === date ? "bg-fuchsia-100 text-fuchsia-800" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+                title={day.label}
+              >
+                {day.short}
+              </button>
+            ))}
           </div>
 
+          <p className="ml-auto text-sm font-semibold text-slate-700">WEEK TOTAL {formatDurationShort(weekTotalSeconds)}</p>
+          <div className="flex overflow-hidden rounded-md border border-slate-300">
+            <span className="bg-fuchsia-100 px-3 py-1 text-sm font-medium text-fuchsia-800">Calendar</span>
+            <span className="px-3 py-1 text-sm text-slate-700">List view</span>
+            <span className="px-3 py-1 text-sm text-slate-700">Timesheet</span>
+          </div>
+        </div>
+        {entries?.warning && <p className="mt-2 text-xs text-amber-700">{entries.warning}</p>}
+        {error && <p className="mt-2 text-xs text-rose-700">{error}</p>}
+      </div>
+
+      <div className="grid min-h-[620px] grid-cols-1 xl:grid-cols-[1fr_320px]">
+        <section className="relative border-r border-slate-200">
           {calendarDraft && (
-            <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-              <p className="font-medium text-slate-800">
-                Draft at {String(calendarDraft.hour).padStart(2, "0")}:{String(calendarDraft.minute).padStart(2, "0")}
-              </p>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
+            <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium text-slate-700">
+                  Add entry at {String(calendarDraft.hour).padStart(2, "0")}:{String(calendarDraft.minute).padStart(2, "0")}
+                </span>
                 <input
                   type="number"
                   min={15}
                   step={15}
                   value={draftDurationMinutes}
                   onChange={(event) => setDraftDurationMinutes(event.target.value)}
-                  className="w-[110px] rounded border border-slate-300 px-2 py-1"
+                  className="w-[90px] rounded border border-slate-300 px-2 py-1"
                 />
-                <span className="text-slate-600">minutes</span>
+                <span className="text-slate-600">min</span>
                 <button
                   type="button"
                   disabled={busy}
@@ -321,7 +435,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
                       setBusy(false);
                     }
                   }}
-                  className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+                  className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:bg-slate-300"
                 >
                   Add
                 </button>
@@ -332,8 +446,8 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
             </div>
           )}
 
-          <div className="relative overflow-x-auto rounded-xl border border-slate-200 bg-white">
-            <div className="relative min-w-[760px]" style={{ height: `${24 * CALENDAR_HOUR_HEIGHT}px` }}>
+          <div className="relative overflow-x-auto">
+            <div className="relative min-w-[820px]" style={{ height: `${24 * CALENDAR_HOUR_HEIGHT}px` }}>
               {hours.map((hour) => (
                 <button
                   key={hour}
@@ -349,7 +463,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
               {calendarBlocks.map((block) => (
                 <div
                   key={block.id}
-                  className="absolute left-24 right-3 overflow-hidden rounded-lg border border-slate-200 bg-slate-100 px-2 py-1 text-xs shadow-sm"
+                  className={`absolute left-24 right-8 overflow-hidden rounded-lg border px-2 py-1 text-xs shadow-sm ${projectColorClass(block.project)}`}
                   style={{ top: `${block.top}px`, height: `${Math.max(22, block.height)}px` }}
                 >
                   <p className="truncate font-semibold text-slate-900">{block.description}</p>
@@ -357,67 +471,20 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
                   <p className="text-[11px] text-slate-600">{block.timeRange}</p>
                 </div>
               ))}
+
+              {nowMarkerTop !== null && (
+                <div className="pointer-events-none absolute left-24 right-0 border-t-2 border-fuchsia-500" style={{ top: `${nowMarkerTop}px` }} />
+              )}
             </div>
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-emerald-50/40 p-5 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-900">Projects</h2>
-          <div className="mt-3 flex gap-2">
-            <input
-              type="text"
-              value={newProjectName}
-              onChange={(event) => setNewProjectName(event.target.value)}
-              placeholder="Create new project"
-              className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            />
-            <button
-              type="button"
-              disabled={busy}
-              onClick={async () => {
-                if (!newProjectName.trim()) return;
-                setBusy(true);
-                setError(null);
-                try {
-                  const res = await fetch("/api/projects", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ name: newProjectName }),
-                  });
-                  const data = (await res.json()) as { error?: string; project?: ProjectItem };
-                  if (!res.ok || data.error) throw new Error(data.error || "Failed to create project");
-                  if (data.project) {
-                    setProjects((prev) => [...prev.filter((p) => p.key !== data.project!.key), data.project!].sort((a, b) => a.name.localeCompare(b.name)));
-                    setProjectName(data.project.name);
-                  }
-                  setNewProjectName("");
-                } catch (err) {
-                  setError(err instanceof Error ? err.message : "Failed to create project");
-                } finally {
-                  setBusy(false);
-                }
-              }}
-              className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-400"
-            >
-              Add
-            </button>
+        <aside className="hidden bg-slate-50/70 p-4 xl:block">
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <p className="text-sm font-semibold text-slate-800">Goals</p>
+            <p className="mt-3 text-sm text-slate-500">Create a goal</p>
           </div>
-
-          <div className="mt-3 max-h-[560px] space-y-2 overflow-auto pr-1">
-            {projects.map((project) => (
-              <button
-                key={project.key}
-                type="button"
-                onClick={() => setProjectName(project.name)}
-                className="flex w-full items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-left hover:bg-slate-50"
-              >
-                <span className="truncate text-sm text-slate-900">{project.name}</span>
-                <span className="ml-2 shrink-0 rounded bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">{project.source}</span>
-              </button>
-            ))}
-            {projects.length === 0 && <p className="text-sm text-slate-500">No projects yet.</p>}
-          </div>
-        </section>
+        </aside>
       </div>
     </div>
   );
