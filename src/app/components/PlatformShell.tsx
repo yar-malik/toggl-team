@@ -4,12 +4,77 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
+type IconProps = { className?: string };
+
 function navClass(active: boolean) {
   return `block w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${
     active
       ? "border border-rose-200 bg-gradient-to-r from-rose-100 to-fuchsia-100 text-rose-900 shadow-sm"
       : "border border-transparent text-slate-700 hover:border-sky-100 hover:bg-sky-50"
   }`;
+}
+
+function iconClass() {
+  return "h-4 w-4 shrink-0 text-slate-500";
+}
+
+function ClockIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true">
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7.8v4.6l3 1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ReportsIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <rect x="4" y="11" width="3.5" height="9" rx="1.5" />
+      <rect x="10.25" y="6.5" width="3.5" height="13.5" rx="1.5" />
+      <rect x="16.5" y="14" width="3.5" height="6" rx="1.5" />
+    </svg>
+  );
+}
+
+function TeamIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <circle cx="8" cy="9" r="3" />
+      <circle cx="16.5" cy="8.5" r="2.5" />
+      <path d="M3.5 18.5a4.5 4.5 0 0 1 9 0v1H3.5z" />
+      <path d="M13 19a3.5 3.5 0 0 1 7 0v.5h-7z" />
+    </svg>
+  );
+}
+
+function ProjectsIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3l1.5 1.5h8.5A2.5 2.5 0 0 1 21 9v9.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5z" />
+    </svg>
+  );
+}
+
+function MembersIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <circle cx="9" cy="8.8" r="2.8" />
+      <circle cx="16.8" cy="8.2" r="2.2" />
+      <path d="M4 19a5 5 0 0 1 10 0v1H4z" />
+      <path d="M14 19a3.8 3.8 0 0 1 7.6 0v1H14z" />
+    </svg>
+  );
+}
+
+function KpiIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true">
+      <path d="M4 18h16" strokeLinecap="round" />
+      <path d="m5.5 15.5 4-4 3 2.8 5-6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M17.5 8.3h2.2v2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
 function isActive(pathname: string, href: string) {
@@ -154,10 +219,14 @@ export default function PlatformShell({
                         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
                         <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
                       </span>
+                      <ClockIcon className={iconClass()} />
                       <span className="tabular-nums">{runningLabel}</span>
                     </span>
                   ) : (
-                    "Tracking"
+                    <span className="inline-flex items-center gap-2">
+                      <ClockIcon className={iconClass()} />
+                      <span>Tracking</span>
+                    </span>
                   )}
                 </Link>
               </div>
@@ -167,10 +236,16 @@ export default function PlatformShell({
               <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Analyze</p>
               <div className="mt-2 space-y-1.5">
                 <Link href="/reports" className={navClass(isActive(pathname, "/reports"))}>
-                  Reports
+                  <span className="inline-flex items-center gap-2">
+                    <ReportsIcon className={iconClass()} />
+                    <span>Reports</span>
+                  </span>
                 </Link>
                 <Link href="/team-overview" className={navClass(isActive(pathname, "/team-overview"))}>
-                  Team overview
+                  <span className="inline-flex items-center gap-2">
+                    <TeamIcon className={iconClass()} />
+                    <span>Team overview</span>
+                  </span>
                 </Link>
               </div>
             </div>
@@ -179,13 +254,22 @@ export default function PlatformShell({
               <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Manage</p>
               <div className="mt-2 space-y-1.5">
                 <Link href="/projects" className={navClass(isActive(pathname, "/projects"))}>
-                  Projects
+                  <span className="inline-flex items-center gap-2">
+                    <ProjectsIcon className={iconClass()} />
+                    <span>Projects</span>
+                  </span>
                 </Link>
                 <Link href="/members" className={navClass(isActive(pathname, "/members") || isActive(pathname, "/member"))}>
-                  Members
+                  <span className="inline-flex items-center gap-2">
+                    <MembersIcon className={iconClass()} />
+                    <span>Members</span>
+                  </span>
                 </Link>
                 <Link href="/kpis" className={navClass(isActive(pathname, "/kpis"))}>
-                  KPIs
+                  <span className="inline-flex items-center gap-2">
+                    <KpiIcon className={iconClass()} />
+                    <span>KPIs</span>
+                  </span>
                 </Link>
               </div>
             </div>
