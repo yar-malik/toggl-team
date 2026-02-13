@@ -1,32 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  fetchCurrentEntry,
-  fetchProjectNames,
-  fetchTimeEntries,
-  getEntryProjectName,
-  getTeamMembers,
-  getTokenForMember,
-  sortEntriesByStart,
-} from "@/lib/toggl";
-import { persistHistoricalError, persistHistoricalSnapshot } from "@/lib/historyStore";
-import { getQuotaLockState, setQuotaLock } from "@/lib/quotaLockStore";
 import { canonicalizeMemberName, namesMatch } from "@/lib/memberNames";
+import { listMembers } from "@/lib/manualTimeEntriesStore";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+type StoredEntry = {
+  id: number;
+  description: string | null;
+  start: string;
+  stop: string | null;
+  duration: number;
+  tags: string[];
+  project_name: string | null;
+};
+
 type EntriesPayload = {
-  entries: Array<Awaited<ReturnType<typeof fetchTimeEntries>>[number] & { project_name?: string | null }>;
-  current: (Awaited<ReturnType<typeof fetchCurrentEntry>> & { project_name?: string | null }) | null;
+  entries: StoredEntry[];
+  current: StoredEntry | null;
   totalSeconds: number;
   date: string;
   cachedAt: string;
   stale?: boolean;
   warning?: string | null;
-  quotaRemaining?: string | null;
-  quotaResetsIn?: string | null;
 };
 
 type StoredEntryRow = {
@@ -68,13 +66,6 @@ function buildUtcDayRange(dateInput: string, tzOffsetMinutes: number) {
   const startMs = Date.UTC(year, month, day, 0, 0, 0, 0) + tzOffsetMinutes * 60 * 1000;
   const endMs = Date.UTC(year, month, day, 23, 59, 59, 999) + tzOffsetMinutes * 60 * 1000;
   return { startDate: new Date(startMs).toISOString(), endDate: new Date(endMs).toISOString() };
-}
-
-function parseRetryAfterSeconds(value: string | null | undefined): number | null {
-  if (!value) return null;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return null;
-  return Math.ceil(parsed);
 }
 
 async function readStoredEntries(member: string, startIso: string, endIso: string): Promise<EntriesPayload | null> {
@@ -119,7 +110,7 @@ async function readStoredEntries(member: string, startIso: string, endIso: strin
     }
   }
 
-  const entries = rows.map((row) => ({
+  const entries: StoredEntry[] = rows.map((row) => ({
     id: row.toggl_entry_id,
     description: row.description,
     start: row.start_at,
@@ -161,7 +152,6 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const memberParam = searchParams.get("member");
   const dateParam = searchParams.get("date");
-  const forceRefresh = searchParams.get("refresh") === "1";
   const tzOffsetMinutes = parseTzOffsetMinutes(searchParams.get("tzOffset"));
 
   if (!memberParam) {
@@ -169,8 +159,8 @@ export async function GET(request: NextRequest) {
   }
   const member = canonicalizeMemberName(memberParam);
 
-  const members = getTeamMembers();
-  if (!members.some((item) => namesMatch(item.name, member))) {
+  const members = await listMembers();
+  if (!members.some((item) => namesMatch(item, member))) {
     return NextResponse.json({ error: "Unknown member" }, { status: 404 });
   }
 
@@ -180,143 +170,30 @@ export async function GET(request: NextRequest) {
   }
 
   const { startDate, endDate } = buildUtcDayRange(dateInput, tzOffsetMinutes);
+  const stored = await readStoredEntries(member, startDate, endDate);
 
-  if (!forceRefresh) {
-    const stored = await readStoredEntries(member, startDate, endDate);
-    if (stored) {
-      return NextResponse.json({
-        ...stored,
-        date: dateInput,
-        stale: false,
-        warning: null,
-        source: "db",
-        cooldownActive: false,
-        retryAfterSeconds: 0,
-      });
-    }
+  if (stored) {
     return NextResponse.json({
-      entries: [],
-      current: null,
-      totalSeconds: 0,
+      ...stored,
       date: dateInput,
-      cachedAt: new Date().toISOString(),
-      stale: true,
-      warning: "No stored entries for this day yet. Click Refresh now to import and save from Toggl.",
+      stale: false,
+      warning: null,
       source: "db",
       cooldownActive: false,
       retryAfterSeconds: 0,
     });
   }
 
-  const quotaLock = await getQuotaLockState();
-  if (quotaLock.active) {
-    const stored = await readStoredEntries(member, startDate, endDate);
-    return NextResponse.json({
-      ...(stored ?? {
-        entries: [],
-        current: null,
-        totalSeconds: 0,
-        date: dateInput,
-        cachedAt: new Date().toISOString(),
-      }),
-      date: dateInput,
-      stale: true,
-      warning: "Toggl quota cooldown active. Showing stored data from Supabase.",
-      source: "db_fallback",
-      cooldownActive: true,
-      retryAfterSeconds: quotaLock.retryAfterSeconds,
-    });
-  }
-
-  const token = getTokenForMember(member);
-  if (!token) {
-    return NextResponse.json({ error: "Missing token for member" }, { status: 400 });
-  }
-
-  const nowMs = Date.now();
-  const isCurrentWindow = nowMs >= new Date(startDate).getTime() && nowMs <= new Date(endDate).getTime();
-
-  try {
-    const [entries, current] = await Promise.all([
-      fetchTimeEntries(token, startDate, endDate),
-      isCurrentWindow ? fetchCurrentEntry(token) : Promise.resolve(null),
-    ]);
-    const projectNames = await fetchProjectNames(token, current ? [...entries, current] : entries);
-    const sortedEntries = sortEntriesByStart(entries).map((entry) => ({
-      ...entry,
-      project_name: getEntryProjectName(entry, projectNames),
-    }));
-    const enrichedCurrent = current
-      ? {
-          ...current,
-          project_name: getEntryProjectName(current, projectNames),
-        }
-      : null;
-
-    const totalSeconds = sortedEntries.reduce((acc, entry) => {
-      if (entry.duration >= 0) return acc + entry.duration;
-      const startedAt = new Date(entry.start).getTime();
-      if (Number.isNaN(startedAt)) return acc;
-      return acc + Math.floor((Date.now() - startedAt) / 1000);
-    }, 0);
-
-    await persistHistoricalSnapshot("entries", member, dateInput, sortedEntries);
-
-    const payload: EntriesPayload = {
-      entries: sortedEntries,
-      current: enrichedCurrent,
-      totalSeconds,
-      date: dateInput,
-      cachedAt: new Date().toISOString(),
-    };
-    return NextResponse.json({
-      ...payload,
-      stale: false,
-      warning: null,
-      source: "toggl_sync",
-      cooldownActive: false,
-      retryAfterSeconds: 0,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    const status = (error as Error & { status?: number }).status ?? 502;
-    const retryAfterSeconds = parseRetryAfterSeconds((error as Error & { retryAfter?: string | null }).retryAfter ?? null);
-    const quotaRemaining = (error as Error & { quotaRemaining?: string | null }).quotaRemaining ?? null;
-    const quotaResetsIn = (error as Error & { quotaResetsIn?: string | null }).quotaResetsIn ?? null;
-
-    if (status === 402) {
-      await setQuotaLock({
-        status,
-        lockForSeconds: retryAfterSeconds ?? 60 * 60,
-        retryHintSeconds: retryAfterSeconds ?? null,
-        reason: "Toggl 402 quota reached",
-      });
-    } else if (status === 429) {
-      await setQuotaLock({
-        status,
-        lockForSeconds: retryAfterSeconds ?? 5 * 60,
-        retryHintSeconds: retryAfterSeconds ?? null,
-        reason: "Toggl 429 rate limited",
-      });
-    }
-
-    const stored = await readStoredEntries(member, startDate, endDate);
-    if (stored) {
-      await persistHistoricalError("entries", member, dateInput, message);
-      return NextResponse.json({
-        ...stored,
-        date: dateInput,
-        stale: true,
-        warning: "Toggl refresh failed. Showing stored data from Supabase.",
-        quotaRemaining,
-        quotaResetsIn,
-        source: "db_fallback",
-        cooldownActive: status === 402 || status === 429,
-        retryAfterSeconds: retryAfterSeconds ?? 0,
-      });
-    }
-
-    await persistHistoricalError("entries", member, dateInput, message);
-    return NextResponse.json({ error: message }, { status: status >= 400 ? status : 502 });
-  }
+  return NextResponse.json({
+    entries: [],
+    current: null,
+    totalSeconds: 0,
+    date: dateInput,
+    cachedAt: new Date().toISOString(),
+    stale: true,
+    warning: "No stored entries for this day yet.",
+    source: "db",
+    cooldownActive: false,
+    retryAfterSeconds: 0,
+  });
 }

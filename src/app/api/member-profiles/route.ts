@@ -1,13 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  fetchProjectNames,
-  fetchTimeEntries,
-  getEntryProjectName,
-  getTeamMembers,
-  getTokenForMember,
-} from "@/lib/toggl";
-import { persistHistoricalError, persistHistoricalSnapshot } from "@/lib/historyStore";
-import { getQuotaLockState, setQuotaLock } from "@/lib/quotaLockStore";
+import { listMemberProfiles } from "@/lib/manualTimeEntriesStore";
 import { canonicalizeMemberName, expandMemberAliases, namesMatch } from "@/lib/memberNames";
 
 export const dynamic = "force-dynamic";
@@ -294,25 +286,11 @@ function buildUtcRangeFromLocalDates(startDate: string, endDate: string, tzOffse
   return { startIso: new Date(startMs).toISOString(), endIso: new Date(endMs).toISOString() };
 }
 
-function parseRetryAfterSeconds(value: string | null | undefined): number | null {
-  if (!value) return null;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return null;
-  return Math.ceil(parsed);
-}
-
 function getDateKeyAtOffset(iso: string, tzOffsetMinutes: number) {
   const utcMs = new Date(iso).getTime();
   if (Number.isNaN(utcMs)) return null;
   const shifted = new Date(utcMs - tzOffsetMinutes * 60 * 1000);
   return shifted.toISOString().slice(0, 10);
-}
-
-function normalizeDurationFromToggl(entry: Awaited<ReturnType<typeof fetchTimeEntries>>[number]) {
-  if (entry.duration >= 0) return entry.duration;
-  const startedAt = new Date(entry.start).getTime();
-  if (Number.isNaN(startedAt)) return 0;
-  return Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
 }
 
 function normalizeLabel(value: string | null | undefined, fallback: string) {
@@ -563,7 +541,6 @@ export async function GET(request: NextRequest) {
   const dateParam = searchParams.get("date");
   const memberParamRaw = searchParams.get("member")?.trim() ?? "";
   const memberParam = memberParamRaw ? canonicalizeMemberName(memberParamRaw) : "";
-  const forceRefresh = searchParams.get("refresh") === "1";
   const tzOffsetMinutes = parseTzOffsetMinutes(searchParams.get("tzOffset"));
 
   const endDate = dateParam ?? new Date().toISOString().slice(0, 10);
@@ -573,9 +550,9 @@ export async function GET(request: NextRequest) {
 
   const weekDates = getLastSevenDates(endDate);
   const startDate = weekDates[0];
-  const teamMembers = getTeamMembers();
+  const teamMembers = (await listMemberProfiles()).map((item) => ({ name: item.name }));
   if (teamMembers.length === 0) {
-    return NextResponse.json({ error: "No members configured" }, { status: 400 });
+    return NextResponse.json({ error: "No members configured in database" }, { status: 400 });
   }
   const members = memberParam
     ? teamMembers.filter((member) => namesMatch(member.name, memberParam))
@@ -587,201 +564,58 @@ export async function GET(request: NextRequest) {
   const range = buildUtcRangeFromLocalDates(startDate, endDate, tzOffsetMinutes);
   const aiEnabled = Boolean(process.env.OPENAI_API_KEY);
   const kpiOverridesPromise = fetchKpiOverridesFromCsv();
-
-  if (!forceRefresh) {
-    const [stored, kpiOverrides] = await Promise.all([
-      readStoredEntries(members, range.startIso, range.endIso),
-      kpiOverridesPromise,
-    ]);
-    if (stored.entries.length === 0) {
-      return NextResponse.json({
-        startDate,
-        endDate,
-        weekDates,
-        members: members.map((member) => createEmptyProfile(member.name, weekDates)),
-        cachedAt: new Date().toISOString(),
-        stale: true,
-        warning: "No stored history yet. Click Refresh now once to import and save this range.",
-        aiEnabled,
-        aiWarning: null,
-        source: "db",
-        cooldownActive: false,
-        retryAfterSeconds: 0,
-      });
-    }
-
-    const profiles = buildProfilesFromEntries(members, stored.entries, weekDates, tzOffsetMinutes, kpiOverrides);
-    const sorted = [...profiles].sort((a, b) => {
-      if (b.totalSeconds !== a.totalSeconds) return b.totalSeconds - a.totalSeconds;
-      if (b.entryCount !== a.entryCount) return b.entryCount - a.entryCount;
-      return a.name.localeCompare(b.name);
-    });
+  const [stored, kpiOverrides] = await Promise.all([
+    readStoredEntries(members, range.startIso, range.endIso),
+    kpiOverridesPromise,
+  ]);
+  if (stored.entries.length === 0) {
     return NextResponse.json({
       startDate,
       endDate,
       weekDates,
-      members: sorted,
-      cachedAt: stored.latestSyncedAt ?? new Date().toISOString(),
-      stale: false,
-      warning: null,
+      members: members.map((member) => createEmptyProfile(member.name, weekDates)),
+      cachedAt: new Date().toISOString(),
+      stale: true,
+      warning: "No stored history yet for this range.",
       aiEnabled,
-      aiWarning: aiEnabled ? "AI analysis is generated on manual refresh to avoid unnecessary API usage." : null,
+      aiWarning: null,
       source: "db",
       cooldownActive: false,
       retryAfterSeconds: 0,
     });
   }
 
-  const quotaLock = await getQuotaLockState();
-  if (quotaLock.active) {
-    const [stored, kpiOverrides] = await Promise.all([
-      readStoredEntries(members, range.startIso, range.endIso),
-      kpiOverridesPromise,
-    ]);
-    const profiles =
-      stored.entries.length > 0
-        ? buildProfilesFromEntries(members, stored.entries, weekDates, tzOffsetMinutes, kpiOverrides)
-        : members.map((member) => createEmptyProfile(member.name, weekDates));
-    return NextResponse.json({
-      startDate,
-      endDate,
-      weekDates,
-      members: profiles,
-      cachedAt: stored.latestSyncedAt ?? new Date().toISOString(),
-      stale: true,
-      warning: "Toggl quota cooldown active. Showing stored data from Supabase.",
-      aiEnabled,
-      aiWarning: aiEnabled ? "AI analysis is generated on manual refresh to avoid unnecessary API usage." : null,
-      source: "db_fallback",
-      cooldownActive: true,
-      retryAfterSeconds: quotaLock.retryAfterSeconds,
-    });
-  }
+  const profiles = buildProfilesFromEntries(members, stored.entries, weekDates, tzOffsetMinutes, kpiOverrides);
+  let aiWarning: string | null = null;
+  const profilesWithAi = await Promise.all(
+    profiles.map(async (profile) => {
+      if (!aiEnabled) return profile;
+      const aiAnalysis = await buildAiAnalysis(profile);
+      if (!aiAnalysis) {
+        aiWarning = "AI analysis is enabled, but one or more summaries could not be generated.";
+      }
+      return { ...profile, aiAnalysis };
+    })
+  );
 
-  try {
-    const entriesForProfiles = await Promise.all(
-      members.map(async (member) => {
-        const token = getTokenForMember(member.name);
-        if (!token) {
-          return [] as ProfileEntry[];
-        }
+  const sorted = [...profilesWithAi].sort((a, b) => {
+    if (b.totalSeconds !== a.totalSeconds) return b.totalSeconds - a.totalSeconds;
+    if (b.entryCount !== a.entryCount) return b.entryCount - a.entryCount;
+    return a.name.localeCompare(b.name);
+  });
 
-        const entries = await fetchTimeEntries(token, range.startIso, range.endIso);
-        const projectNames = await fetchProjectNames(token, entries);
-        const profileEntries: ProfileEntry[] = entries.map((entry) => ({
-          memberName: member.name,
-          description: entry.description,
-          start: entry.start,
-          durationSeconds: normalizeDurationFromToggl(entry),
-          projectName: getEntryProjectName(entry, projectNames),
-        }));
-
-        const entriesByLocalDate = new Map<string, Array<Awaited<ReturnType<typeof fetchTimeEntries>>[number]>>();
-        for (const entry of entries) {
-          const localDate = getDateKeyAtOffset(entry.start, tzOffsetMinutes) ?? endDate;
-          const current = entriesByLocalDate.get(localDate) ?? [];
-          current.push({
-            ...entry,
-            project_name: getEntryProjectName(entry, projectNames) ?? null,
-          } as Awaited<ReturnType<typeof fetchTimeEntries>>[number]);
-          entriesByLocalDate.set(localDate, current);
-        }
-
-        await Promise.all(
-          Array.from(entriesByLocalDate.entries()).map(([localDate, list]) =>
-            persistHistoricalSnapshot(
-              "team",
-              member.name,
-              localDate,
-              list.map((entry) => ({
-                ...entry,
-                project_name: getEntryProjectName(entry, projectNames) ?? null,
-              }))
-            )
-          )
-        );
-
-        return profileEntries;
-      })
-    );
-
-    const mergedEntries = entriesForProfiles.flat();
-    const kpiOverrides = await kpiOverridesPromise;
-    const profiles = buildProfilesFromEntries(members, mergedEntries, weekDates, tzOffsetMinutes, kpiOverrides);
-
-    let aiWarning: string | null = null;
-    const profilesWithAi = await Promise.all(
-      profiles.map(async (profile) => {
-        if (!aiEnabled) return profile;
-        const aiAnalysis = await buildAiAnalysis(profile);
-        if (!aiAnalysis) {
-          aiWarning = "AI analysis is enabled, but one or more summaries could not be generated.";
-        }
-        return { ...profile, aiAnalysis };
-      })
-    );
-
-    const sorted = [...profilesWithAi].sort((a, b) => {
-      if (b.totalSeconds !== a.totalSeconds) return b.totalSeconds - a.totalSeconds;
-      if (b.entryCount !== a.entryCount) return b.entryCount - a.entryCount;
-      return a.name.localeCompare(b.name);
-    });
-
-    return NextResponse.json({
-      startDate,
-      endDate,
-      weekDates,
-      members: sorted,
-      cachedAt: new Date().toISOString(),
-      aiEnabled,
-      aiWarning,
-      stale: false,
-      warning: null,
-      source: "toggl_sync",
-      cooldownActive: false,
-      retryAfterSeconds: 0,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    const status = (error as Error & { status?: number }).status ?? 502;
-    const retryAfterSeconds = parseRetryAfterSeconds((error as Error & { retryAfter?: string | null }).retryAfter ?? null);
-    if (status === 402) {
-      await setQuotaLock({
-        status,
-        lockForSeconds: retryAfterSeconds ?? 60 * 60,
-        retryHintSeconds: retryAfterSeconds ?? null,
-        reason: "Toggl 402 quota reached",
-      });
-    } else if (status === 429) {
-      await setQuotaLock({
-        status,
-        lockForSeconds: retryAfterSeconds ?? 5 * 60,
-        retryHintSeconds: retryAfterSeconds ?? null,
-        reason: "Toggl 429 rate limited",
-      });
-    }
-    await persistHistoricalError("team", memberParam || null, endDate, message);
-    const [stored, kpiOverrides] = await Promise.all([
-      readStoredEntries(members, range.startIso, range.endIso),
-      kpiOverridesPromise,
-    ]);
-    if (stored.entries.length > 0) {
-      const profiles = buildProfilesFromEntries(members, stored.entries, weekDates, tzOffsetMinutes, kpiOverrides);
-      return NextResponse.json({
-        startDate,
-        endDate,
-        weekDates,
-        members: profiles,
-        cachedAt: stored.latestSyncedAt ?? new Date().toISOString(),
-        stale: true,
-        warning: "Toggl refresh failed. Showing stored data from Supabase.",
-        aiEnabled,
-        aiWarning: aiEnabled ? "AI analysis is generated on manual refresh to avoid unnecessary API usage." : null,
-        source: "db_fallback",
-        cooldownActive: status === 402 || status === 429,
-        retryAfterSeconds: retryAfterSeconds ?? 0,
-      });
-    }
-    return NextResponse.json({ error: message }, { status: status >= 400 ? status : 502 });
-  }
+  return NextResponse.json({
+    startDate,
+    endDate,
+    weekDates,
+    members: sorted,
+    cachedAt: stored.latestSyncedAt ?? new Date().toISOString(),
+    stale: false,
+    warning: null,
+    aiEnabled,
+    aiWarning,
+    source: "db",
+    cooldownActive: false,
+    retryAfterSeconds: 0,
+  });
 }

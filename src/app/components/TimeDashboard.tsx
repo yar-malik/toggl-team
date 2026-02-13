@@ -28,7 +28,7 @@ type EntriesResponse = {
   retryAfter?: string | null;
   quotaRemaining?: string | null;
   quotaResetsIn?: string | null;
-  source?: "db" | "toggl_sync" | "db_fallback";
+  source?: "db";
   cooldownActive?: boolean;
   retryAfterSeconds?: number;
 };
@@ -43,7 +43,7 @@ type TeamResponse = {
   retryAfter?: string | null;
   quotaRemaining?: string | null;
   quotaResetsIn?: string | null;
-  source?: "db" | "toggl_sync" | "db_fallback";
+  source?: "db";
   cooldownActive?: boolean;
   retryAfterSeconds?: number;
 };
@@ -64,7 +64,7 @@ type TeamWeekResponse = {
   error?: string;
   quotaRemaining?: string | null;
   quotaResetsIn?: string | null;
-  source?: "db" | "toggl_sync" | "db_fallback";
+  source?: "db";
   cooldownActive?: boolean;
   retryAfterSeconds?: number;
 };
@@ -300,14 +300,6 @@ function formatShortDateLabel(dateInput: string): string {
   return date.toLocaleDateString([], { weekday: "short", month: "numeric", day: "numeric" });
 }
 
-function formatWaitMinutes(secondsRaw: string | null): string | null {
-  if (!secondsRaw) return null;
-  const seconds = Number(secondsRaw);
-  if (!Number.isFinite(seconds) || seconds < 0) return null;
-  const minutes = Math.max(1, Math.ceil(seconds / 60));
-  return `${minutes} min`;
-}
-
 function getMemberPageHref(memberName: string, date: string) {
   return `/member/${encodeURIComponent(memberName)}?date=${encodeURIComponent(date)}`;
 }
@@ -417,22 +409,14 @@ export default function TimeDashboard({
   const [teamWeekData, setTeamWeekData] = useState<TeamWeekResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [retryAfter, setRetryAfter] = useState<string | null>(null);
-  const [quotaRemaining, setQuotaRemaining] = useState<string | null>(null);
-  const [quotaResetsIn, setQuotaResetsIn] = useState<string | null>(null);
   const [mode, setMode] = useState<"member" | "team" | "all">("all");
   const [selectedEntry, setSelectedEntry] = useState<EntryModalData | null>(null);
-  const [manualRefreshTick, setManualRefreshTick] = useState(0);
+  const [refreshTick, setRefreshTick] = useState(0);
   const [lastUpdateMeta, setLastUpdateMeta] = useState<{
     at: string;
-    trigger: "auto" | "manual" | "cached";
-    dataSource: "db" | "toggl_sync" | "db_fallback" | null;
+    dataSource: "db" | null;
   } | null>(null);
-  const [cooldownUntilMs, setCooldownUntilMs] = useState<number | null>(null);
-  const [cooldownNowMs, setCooldownNowMs] = useState(0);
   const [hoverTooltip, setHoverTooltip] = useState<HoverTooltipState | null>(null);
-  const forceRefreshRef = useRef(false);
-  const refreshSourceRef = useRef<"auto" | "manual" | "cached">("cached");
   const dayCalendarScrollRef = useRef<HTMLDivElement | null>(null);
   const allCalendarsScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -485,19 +469,11 @@ export default function TimeDashboard({
 
     let active = true;
     const requestNonce = String(Date.now());
-    const shouldForceRefresh = forceRefreshRef.current;
-    const refreshTrigger = shouldForceRefresh ? refreshSourceRef.current : "cached";
     setLoading(true);
     setError(null);
-    setRetryAfter(null);
-    setQuotaRemaining(null);
-    setQuotaResetsIn(null);
 
     const params = new URLSearchParams({ date, tzOffset: String(new Date().getTimezoneOffset()) });
     params.set("_req", requestNonce);
-    if (shouldForceRefresh) {
-      params.set("refresh", "1");
-    }
     const url =
       mode === "team" || mode === "all"
         ? `/api/team?${params.toString()}`
@@ -506,24 +482,13 @@ export default function TimeDashboard({
             date,
             tzOffset: String(new Date().getTimezoneOffset()),
             _req: requestNonce,
-            ...(shouldForceRefresh ? { refresh: "1" } : {}),
           }).toString()}`;
 
     fetch(url, { cache: "no-store" })
       .then(async (res) => {
         const payload = (await res.json()) as EntriesResponse | TeamResponse;
         if (!res.ok || payload.error) {
-          const err = new Error(payload.error || "Request failed") as Error & {
-            retryAfter?: string | null;
-            quotaRemaining?: string | null;
-            quotaResetsIn?: string | null;
-          };
-          err.retryAfter = (payload as EntriesResponse).retryAfter ?? (payload as TeamResponse).retryAfter ?? null;
-          err.quotaRemaining =
-            (payload as EntriesResponse).quotaRemaining ?? (payload as TeamResponse).quotaRemaining ?? null;
-          err.quotaResetsIn =
-            (payload as EntriesResponse).quotaResetsIn ?? (payload as TeamResponse).quotaResetsIn ?? null;
-          throw err;
+          throw new Error(payload.error || "Request failed");
         }
         return payload;
       })
@@ -532,53 +497,38 @@ export default function TimeDashboard({
         if (mode === "team" || mode === "all") {
           setTeamData(payload as TeamResponse);
           setData(null);
-          const cooldownActive = (payload as TeamResponse).cooldownActive ?? false;
-          const retryAfterSeconds = (payload as TeamResponse).retryAfterSeconds ?? 0;
-          setCooldownNowMs(Date.now());
-          setCooldownUntilMs(cooldownActive && retryAfterSeconds > 0 ? Date.now() + retryAfterSeconds * 1000 : null);
           const payloadCachedAt = (payload as TeamResponse).cachedAt;
           if (payloadCachedAt) {
             setLastUpdateMeta({
               at: payloadCachedAt,
-              trigger: refreshTrigger,
-              dataSource: (payload as TeamResponse).source ?? null,
+              dataSource: "db",
             });
           }
         } else {
           setData(payload as EntriesResponse);
           setTeamData(null);
-          const cooldownActive = (payload as EntriesResponse).cooldownActive ?? false;
-          const retryAfterSeconds = (payload as EntriesResponse).retryAfterSeconds ?? 0;
-          setCooldownNowMs(Date.now());
-          setCooldownUntilMs(cooldownActive && retryAfterSeconds > 0 ? Date.now() + retryAfterSeconds * 1000 : null);
           const payloadCachedAt = (payload as EntriesResponse).cachedAt;
           if (payloadCachedAt) {
             setLastUpdateMeta({
               at: payloadCachedAt,
-              trigger: refreshTrigger,
-              dataSource: (payload as EntriesResponse).source ?? null,
+              dataSource: "db",
             });
           }
         }
       })
-      .catch((err: Error & { retryAfter?: string | null; quotaRemaining?: string | null; quotaResetsIn?: string | null }) => {
+      .catch((err: Error) => {
         if (!active) return;
         setError(err.message);
-        setRetryAfter(err.retryAfter ?? null);
-        setQuotaRemaining(err.quotaRemaining ?? null);
-        setQuotaResetsIn(err.quotaResetsIn ?? null);
       })
       .finally(() => {
         if (!active) return;
-        forceRefreshRef.current = false;
-        refreshSourceRef.current = "cached";
         setLoading(false);
       });
 
     return () => {
       active = false;
     };
-  }, [member, date, mode, manualRefreshTick]);
+  }, [member, date, mode, refreshTick]);
 
   useEffect(() => {
     if (!(mode === "team" || mode === "all")) return;
@@ -607,25 +557,16 @@ export default function TimeDashboard({
     return () => {
       active = false;
     };
-  }, [mode, date, manualRefreshTick]);
+  }, [mode, date, refreshTick]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       if (document.visibilityState === "hidden") return;
-      refreshSourceRef.current = "auto";
-      setManualRefreshTick((value) => value + 1);
+      setRefreshTick((value) => value + 1);
     }, AUTO_REFRESH_INTERVAL_MS);
 
     return () => window.clearInterval(intervalId);
   }, []);
-
-  useEffect(() => {
-    if (!cooldownUntilMs) return;
-    const tick = window.setInterval(() => {
-      setCooldownNowMs(Date.now());
-    }, 1000);
-    return () => window.clearInterval(tick);
-  }, [cooldownUntilMs]);
 
   const runningEntry = useMemo(() => {
     if (!data?.current) return null;
@@ -687,16 +628,6 @@ export default function TimeDashboard({
       durationSeconds: getEntrySeconds(entry),
     });
   };
-
-  const handleManualRefresh = () => {
-    const remainingSeconds = cooldownUntilMs ? Math.max(0, Math.ceil((cooldownUntilMs - cooldownNowMs) / 1000)) : 0;
-    if (remainingSeconds > 0) return;
-    refreshSourceRef.current = "manual";
-    forceRefreshRef.current = true;
-    setManualRefreshTick((value) => value + 1);
-  };
-  const cooldownRemainingSeconds = cooldownUntilMs ? Math.max(0, Math.ceil((cooldownUntilMs - cooldownNowMs) / 1000)) : 0;
-  const refreshDisabled = loading || cooldownRemainingSeconds > 0;
 
   const hideHoverTooltip = () => setHoverTooltip(null);
 
@@ -774,8 +705,7 @@ export default function TimeDashboard({
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-900">
         <h2 className="text-lg font-semibold">No team members configured</h2>
         <p className="mt-2 text-sm">
-          Add teammate tokens to the <span className="font-mono">TOGGL_TEAM</span> environment
-          variable, then restart the dev server.
+          Add members in the Members section so reports can load from your database history.
         </p>
       </div>
     );
@@ -808,29 +738,10 @@ export default function TimeDashboard({
             Team overview
           </button>
         </div>
-        <div className="flex flex-col items-end gap-1">
-          <button
-            type="button"
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-            onClick={handleManualRefresh}
-            disabled={refreshDisabled}
-          >
-            {loading ? "Refreshing..." : cooldownRemainingSeconds > 0 ? "Cooldown active" : "Refresh now"}
-          </button>
-          <p className="text-xs text-slate-500">
-            Last updated:{" "}
-            {lastUpdateMeta
-              ? `${formatDateTime(lastUpdateMeta.at)} (${lastUpdateMeta.dataSource === "toggl_sync" ? "fresh sync from Toggl" : lastUpdateMeta.dataSource === "db_fallback" ? "DB snapshot (refresh fallback)" : "DB snapshot"})`
-              : "—"}
-          </p>
-        </div>
+        <p className="text-xs text-slate-500">
+          Last updated: {lastUpdateMeta ? `${formatDateTime(lastUpdateMeta.at)} (DB snapshot)` : "—"}
+        </p>
       </div>
-      {cooldownRemainingSeconds > 0 && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          Toggl quota cooldown active. Refresh available in {Math.floor(cooldownRemainingSeconds / 60)}m{" "}
-          {cooldownRemainingSeconds % 60}s.
-        </div>
-      )}
       {mode !== "member" && (
         <p className="text-xs font-medium text-slate-600">
           Tip: Team member names are clickable and open their dedicated profile pages.
@@ -938,15 +849,6 @@ export default function TimeDashboard({
       {error && (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-rose-800">
           <p>{error}</p>
-          {formatWaitMinutes(retryAfter) && (
-            <p className="mt-2 text-sm text-rose-700">Retry after {formatWaitMinutes(retryAfter)}.</p>
-          )}
-          {(quotaRemaining || quotaResetsIn) && (
-            <div className="mt-2 text-sm text-rose-700">
-              {quotaRemaining && <p>Quota remaining: {quotaRemaining}</p>}
-              {formatWaitMinutes(quotaResetsIn) && <p>Quota resets in: {formatWaitMinutes(quotaResetsIn)}.</p>}
-            </div>
-          )}
         </div>
       )}
 
@@ -1092,8 +994,7 @@ export default function TimeDashboard({
                 Notes
               </h3>
               <p className="mt-2 text-sm text-slate-500">
-                Entries auto-refresh from cache when you change filters and every 15 minutes. Toggl is called only
-                when you click Refresh now, and results are saved to the database cache.
+                Entries auto-refresh from your database when you change filters and every 15 minutes.
               </p>
             </div>
             </div>

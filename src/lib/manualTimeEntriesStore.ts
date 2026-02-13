@@ -1,5 +1,4 @@
 import "server-only";
-import { getTeamMembers } from "@/lib/toggl";
 import { canonicalizeMemberName, namesMatch } from "@/lib/memberNames";
 
 type StoredEntryRow = {
@@ -366,9 +365,8 @@ async function ensureMember(memberName: string) {
 }
 
 export async function listMembers(): Promise<string[]> {
-  const envMembers = getTeamMembers().map((item) => canonicalizeMemberName(item.name));
   if (!isSupabaseConfigured()) {
-    return Array.from(new Set(envMembers)).sort((a, b) => a.localeCompare(b));
+    return [];
   }
 
   const response = await fetch(`${getBaseUrl()}/rest/v1/members?select=member_name&order=member_name.asc`, {
@@ -377,21 +375,19 @@ export async function listMembers(): Promise<string[]> {
     cache: "no-store",
   });
   if (!response.ok) {
-    return Array.from(new Set(envMembers)).sort((a, b) => a.localeCompare(b));
+    return [];
   }
   const rows = (await response.json()) as StoredMember[];
-  const dbMembers = rows
+  return rows
     .map((row) => canonicalizeMemberName(row.member_name))
-    .filter((value) => value && value.trim().length > 0);
-  return Array.from(new Set([...dbMembers, ...envMembers])).sort((a, b) => a.localeCompare(b));
+    .filter((value) => value && value.trim().length > 0)
+    .filter((value, index, all) => all.indexOf(value) === index)
+    .sort((a, b) => a.localeCompare(b));
 }
 
 export async function listMemberProfiles(): Promise<Array<{ name: string; email: string | null; role: string | null }>> {
-  const envMembers = getTeamMembers().map((item) => canonicalizeMemberName(item.name));
   if (!isSupabaseConfigured()) {
-    return Array.from(new Set(envMembers))
-      .sort((a, b) => a.localeCompare(b))
-      .map((name) => ({ name, email: null, role: "member" }));
+    return [];
   }
 
   const response = await fetch(`${getBaseUrl()}/rest/v1/members?select=member_name,email,role&order=member_name.asc`, {
@@ -400,9 +396,7 @@ export async function listMemberProfiles(): Promise<Array<{ name: string; email:
     cache: "no-store",
   });
   if (!response.ok) {
-    return Array.from(new Set(envMembers))
-      .sort((a, b) => a.localeCompare(b))
-      .map((name) => ({ name, email: null, role: "member" }));
+    return [];
   }
   const rows = (await response.json()) as StoredMember[];
   const map = new Map<string, { name: string; email: string | null; role: string | null }>();
@@ -415,11 +409,6 @@ export async function listMemberProfiles(): Promise<Array<{ name: string; email:
       email: existing?.email ?? row.email ?? null,
       role: existing?.role ?? row.role ?? "member",
     });
-  }
-  for (const name of envMembers) {
-    if (!map.has(name)) {
-      map.set(name, { name, email: null, role: "member" });
-    }
   }
   return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
 }

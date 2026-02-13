@@ -1,24 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  fetchProjectNames,
-  fetchTimeEntries,
-  getEntryProjectName,
-  getTeamMembers,
-  getTokenForMember,
-  sortEntriesByStart,
-} from "@/lib/toggl";
-import { persistHistoricalError, persistHistoricalSnapshot } from "@/lib/historyStore";
-import { getQuotaLockState, setQuotaLock } from "@/lib/quotaLockStore";
 import { canonicalizeMemberName, expandMemberAliases } from "@/lib/memberNames";
+import { listMemberProfiles } from "@/lib/manualTimeEntriesStore";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+type TimeEntry = {
+  id: number;
+  description: string | null;
+  start: string;
+  stop: string | null;
+  duration: number;
+  tags: string[];
+  project_name: string | null;
+};
+
 type MemberPayload = {
   name: string;
-  entries: Array<Awaited<ReturnType<typeof fetchTimeEntries>>[number] & { project_name?: string | null }>;
+  entries: TimeEntry[];
   current: null;
   totalSeconds: number;
 };
@@ -64,11 +65,8 @@ function buildUtcDayRange(dateInput: string, tzOffsetMinutes: number) {
   return { startDate: new Date(startMs).toISOString(), endDate: new Date(endMs).toISOString() };
 }
 
-function parseRetryAfterSeconds(value: string | null | undefined): number | null {
-  if (!value) return null;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return null;
-  return Math.ceil(parsed);
+function sortEntriesByStart(entries: TimeEntry[]) {
+  return [...entries].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
 }
 
 async function readStoredTeam(
@@ -128,16 +126,12 @@ async function readStoredTeam(
 
   let latestSyncedAt: string | null = null;
   for (const row of rows) {
-    const syncedAt = row.synced_at;
-    if (
-      !latestSyncedAt ||
-      new Date(syncedAt).getTime() > new Date(latestSyncedAt).getTime()
-    ) {
-      latestSyncedAt = syncedAt;
+    if (!latestSyncedAt || new Date(row.synced_at).getTime() > new Date(latestSyncedAt).getTime()) {
+      latestSyncedAt = row.synced_at;
     }
     const bucket = grouped.get(canonicalizeMemberName(row.member_name));
     if (!bucket) continue;
-    const entry = {
+    const entry: TimeEntry = {
       id: row.toggl_entry_id,
       description: row.description,
       start: row.start_at,
@@ -150,19 +144,8 @@ async function readStoredTeam(
     bucket.totalSeconds += Math.max(0, row.duration_seconds);
   }
 
-  const payloadMembers = Array.from(grouped.values()).map((member) => ({
-    ...member,
-    entries: sortEntriesByStart(member.entries),
-  }));
-  if (rows.length === 0) {
-    return {
-      members: payloadMembers,
-      cachedAt: new Date().toISOString(),
-    };
-  }
-
   return {
-    members: payloadMembers,
+    members: Array.from(grouped.values()).map((member) => ({ ...member, entries: sortEntriesByStart(member.entries) })),
     cachedAt: latestSyncedAt ?? new Date().toISOString(),
   };
 }
@@ -170,7 +153,6 @@ async function readStoredTeam(
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const dateParam = searchParams.get("date");
-  const forceRefresh = searchParams.get("refresh") === "1";
   const tzOffsetMinutes = parseTzOffsetMinutes(searchParams.get("tzOffset"));
 
   const dateInput = dateParam ?? new Date().toISOString().slice(0, 10);
@@ -178,164 +160,27 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Invalid date" }, { status: 400 });
   }
 
-  const members = getTeamMembers();
+  const memberProfiles = await listMemberProfiles();
+  const members = memberProfiles.map((member) => ({ name: member.name }));
   if (members.length === 0) {
-    return NextResponse.json({ error: "No members configured" }, { status: 400 });
+    return NextResponse.json({ error: "No members configured in database" }, { status: 400 });
   }
 
   const { startDate, endDate } = buildUtcDayRange(dateInput, tzOffsetMinutes);
-
-  if (!forceRefresh) {
-    const stored = await readStoredTeam(members, startDate, endDate);
-    if (!stored) {
-      return NextResponse.json({ error: "Supabase history is not configured" }, { status: 500 });
-    }
-    const hasData = stored.members.some((member) => member.entries.length > 0);
-    if (!hasData) {
-      return NextResponse.json({
-        date: dateInput,
-        members: stored.members,
-        cachedAt: stored.cachedAt,
-        stale: true,
-        warning: "No stored team entries for this day yet. Click Refresh now to import and save from Toggl.",
-        source: "db",
-        cooldownActive: false,
-        retryAfterSeconds: 0,
-      });
-    }
-    return NextResponse.json({
-      date: dateInput,
-      members: stored.members,
-      cachedAt: stored.cachedAt,
-      stale: false,
-      warning: null,
-      source: "db",
-      cooldownActive: false,
-      retryAfterSeconds: 0,
-    });
+  const stored = await readStoredTeam(members, startDate, endDate);
+  if (!stored) {
+    return NextResponse.json({ error: "Supabase history is not configured" }, { status: 500 });
   }
 
-  const quotaLock = await getQuotaLockState();
-  if (quotaLock.active) {
-    const stored = await readStoredTeam(members, startDate, endDate);
-    return NextResponse.json({
-      date: dateInput,
-      members: stored?.members ?? members.map((member) => ({ name: member.name, entries: [], current: null, totalSeconds: 0 })),
-      cachedAt: stored?.cachedAt ?? new Date().toISOString(),
-      stale: true,
-      warning: "Toggl quota cooldown active. Showing stored data from Supabase.",
-      source: "db_fallback",
-      cooldownActive: true,
-      retryAfterSeconds: quotaLock.retryAfterSeconds,
-    });
-  }
-
-  const storedBeforeRefresh = await readStoredTeam(members, startDate, endDate);
-  const storedMemberByName = new Map<string, MemberPayload>(
-    (storedBeforeRefresh?.members ?? []).map((member) => [member.name, member])
-  );
-
-  try {
-    const refreshErrors: string[] = [];
-    const results = await Promise.all(
-      members.map(async (member) => {
-        const token = getTokenForMember(member.name);
-        if (!token) {
-          const fallback = storedMemberByName.get(member.name);
-          if (fallback) return fallback;
-          return { name: member.name, entries: [], current: null, totalSeconds: 0 };
-        }
-
-        try {
-          const entries = await fetchTimeEntries(token, startDate, endDate);
-          const projectNames = await fetchProjectNames(token, entries);
-          const sortedEntries = sortEntriesByStart(entries).map((entry) => ({
-            ...entry,
-            project_name: getEntryProjectName(entry, projectNames),
-          }));
-
-          const totalSeconds = sortedEntries.reduce((acc, entry) => {
-            if (entry.duration >= 0) return acc + entry.duration;
-            const startedAt = new Date(entry.start).getTime();
-            if (Number.isNaN(startedAt)) return acc;
-            return acc + Math.floor((Date.now() - startedAt) / 1000);
-          }, 0);
-
-          await persistHistoricalSnapshot("team", member.name, dateInput, sortedEntries);
-          return { name: member.name, entries: sortedEntries, current: null, totalSeconds };
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "Unknown refresh error";
-          refreshErrors.push(`${member.name}: ${message}`);
-          const fallback = storedMemberByName.get(member.name);
-          if (fallback) return fallback;
-          return { name: member.name, entries: [], current: null, totalSeconds: 0 };
-        }
-      })
-    );
-
-    const warning =
-      refreshErrors.length > 0
-        ? `Partial refresh completed. ${refreshErrors.length} member(s) used stored data: ${refreshErrors.join(" | ")}`
-        : null;
-    const allMembersFailed = refreshErrors.length === members.length;
-    const responseCachedAt =
-      allMembersFailed && storedBeforeRefresh?.cachedAt ? storedBeforeRefresh.cachedAt : new Date().toISOString();
-
-    if (refreshErrors.length > 0) {
-      await persistHistoricalError("team", null, dateInput, warning ?? "Partial refresh used stored data");
-    }
-
-    return NextResponse.json({
-      date: dateInput,
-      members: results,
-      cachedAt: responseCachedAt,
-      stale: refreshErrors.length > 0,
-      warning,
-      source: refreshErrors.length > 0 ? "db_fallback" : "toggl_sync",
-      cooldownActive: false,
-      retryAfterSeconds: 0,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    const status = (error as Error & { status?: number }).status ?? 502;
-    const retryAfterSeconds = parseRetryAfterSeconds((error as Error & { retryAfter?: string | null }).retryAfter ?? null);
-    const quotaRemaining = (error as Error & { quotaRemaining?: string | null }).quotaRemaining ?? null;
-    const quotaResetsIn = (error as Error & { quotaResetsIn?: string | null }).quotaResetsIn ?? null;
-
-    if (status === 402) {
-      await setQuotaLock({
-        status,
-        lockForSeconds: retryAfterSeconds ?? 60 * 60,
-        retryHintSeconds: retryAfterSeconds ?? null,
-        reason: "Toggl 402 quota reached",
-      });
-    } else if (status === 429) {
-      await setQuotaLock({
-        status,
-        lockForSeconds: retryAfterSeconds ?? 5 * 60,
-        retryHintSeconds: retryAfterSeconds ?? null,
-        reason: "Toggl 429 rate limited",
-      });
-    }
-
-    const stored = await readStoredTeam(members, startDate, endDate);
-    if (stored) {
-      await persistHistoricalError("team", null, dateInput, message);
-      return NextResponse.json({
-        date: dateInput,
-        members: stored.members,
-        cachedAt: stored.cachedAt,
-        stale: true,
-        warning: "Toggl refresh failed. Showing stored team data from Supabase.",
-        quotaRemaining,
-        quotaResetsIn,
-        source: "db_fallback",
-        cooldownActive: status === 402 || status === 429,
-        retryAfterSeconds: retryAfterSeconds ?? 0,
-      });
-    }
-
-    await persistHistoricalError("team", null, dateInput, message);
-    return NextResponse.json({ error: message }, { status: status >= 400 ? status : 502 });
-  }
+  const hasData = stored.members.some((member) => member.entries.length > 0);
+  return NextResponse.json({
+    date: dateInput,
+    members: stored.members,
+    cachedAt: stored.cachedAt,
+    stale: !hasData,
+    warning: hasData ? null : "No stored team entries for this day yet.",
+    source: "db",
+    cooldownActive: false,
+    retryAfterSeconds: 0,
+  });
 }
