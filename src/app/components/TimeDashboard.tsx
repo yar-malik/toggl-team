@@ -383,11 +383,13 @@ export default function TimeDashboard({
   initialMode = "all",
   restrictToMember = null,
   allowAllCalendars = true,
+  allowTeamOverview = true,
 }: {
   members: Member[];
   initialMode?: "member" | "all" | "team";
   restrictToMember?: string | null;
   allowAllCalendars?: boolean;
+  allowTeamOverview?: boolean;
 }) {
   const defaultMember = members[0]?.name ?? "";
   const [member, setMember] = useState(defaultMember);
@@ -418,9 +420,10 @@ export default function TimeDashboard({
       (next: "member" | "team" | "all"): "member" | "team" | "all" => {
         if (isSelfOnly) return "member";
         if (!allowAllCalendars && next === "all") return "team";
+        if (!allowTeamOverview && next === "team") return "all";
         return next;
       },
-    [isSelfOnly, allowAllCalendars]
+    [isSelfOnly, allowAllCalendars, allowTeamOverview]
   );
 
   useEffect(() => {
@@ -761,17 +764,19 @@ export default function TimeDashboard({
                 All calendars
               </button>
             )}
-            <button
-              type="button"
-              className={`rounded-full border px-4 py-2 text-sm font-semibold ${
-                mode === "team"
-                  ? "border-slate-900 bg-slate-900 text-white"
-                  : "border-slate-200 bg-white text-slate-600"
-              }`}
-              onClick={() => setMode("team")}
-            >
-              Team overview
-            </button>
+            {allowTeamOverview && (
+              <button
+                type="button"
+                className={`rounded-full border px-4 py-2 text-sm font-semibold ${
+                  mode === "team"
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-slate-200 bg-white text-slate-600"
+                }`}
+                onClick={() => setMode("team")}
+              >
+                Team overview
+              </button>
+            )}
           </div>
         ) : (
           <p className="text-sm font-semibold text-slate-700">Your report dashboard</p>
