@@ -48,6 +48,17 @@ Notes:
 - Cached snapshots are stored in `public.cache_snapshots`.
 - Historical sync data is also stored for analysis (see tables below).
 
+## AI Setup (Optional)
+
+To enable automatic AI analysis in member profile sections, add:
+
+```bash
+OPENAI_API_KEY=your-openai-api-key
+OPENAI_MODEL=gpt-4.1-mini
+```
+
+`OPENAI_MODEL` is optional. If omitted, the app defaults to `gpt-4.1-mini`.
+
 ## Historical Data Stored
 
 When you click **Refresh view**, the app now persists historical records to Supabase:

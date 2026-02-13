@@ -59,6 +59,33 @@ type TeamWeekResponse = {
   quotaResetsIn?: string | null;
 };
 
+type MemberProfileResponse = {
+  startDate: string;
+  endDate: string;
+  weekDates: string[];
+  members: Array<{
+    name: string;
+    totalSeconds: number;
+    entryCount: number;
+    activeDays: number;
+    averageDailySeconds: number;
+    averageEntrySeconds: number;
+    uniqueProjects: number;
+    uniqueDescriptions: number;
+    topProject: string;
+    topProjectSharePct: number;
+    days: Array<{ date: string; seconds: number; entryCount: number }>;
+    workItems: Array<{ project: string; description: string; seconds: number; entryCount: number }>;
+    aiAnalysis: string | null;
+  }>;
+  cachedAt?: string;
+  stale?: boolean;
+  warning?: string | null;
+  error?: string;
+  aiEnabled?: boolean;
+  aiWarning?: string | null;
+};
+
 type SavedFilter = {
   id: string;
   name: string;
@@ -296,6 +323,14 @@ function formatWaitMinutes(secondsRaw: string | null): string | null {
   return `${minutes} min`;
 }
 
+function toAnchorId(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 function getProjectColorClass(project: string): string {
   if (!project || project === "No project") {
     return "border-slate-300 bg-slate-100/90";
@@ -393,6 +428,8 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
   const [data, setData] = useState<EntriesResponse | null>(null);
   const [teamData, setTeamData] = useState<TeamResponse | null>(null);
   const [teamWeekData, setTeamWeekData] = useState<TeamWeekResponse | null>(null);
+  const [memberProfiles, setMemberProfiles] = useState<MemberProfileResponse | null>(null);
+  const [memberProfilesError, setMemberProfilesError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retryAfter, setRetryAfter] = useState<string | null>(null);
@@ -554,6 +591,38 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
       .catch(() => {
         if (!active) return;
         // keep previous weekly snapshot if fetch fails
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [mode, date, manualRefreshTick]);
+
+  useEffect(() => {
+    if (mode !== "all") return;
+    let active = true;
+    const shouldForceRefresh = forceRefreshRef.current;
+    const params = new URLSearchParams({ date, tzOffset: String(new Date().getTimezoneOffset()) });
+    if (shouldForceRefresh) {
+      params.set("refresh", "1");
+    }
+
+    fetch(`/api/member-profiles?${params.toString()}`)
+      .then(async (res) => {
+        const payload = (await res.json()) as MemberProfileResponse;
+        if (!res.ok || payload.error) {
+          throw new Error(payload.error || "Failed to load member profiles");
+        }
+        return payload;
+      })
+      .then((payload) => {
+        if (!active) return;
+        setMemberProfiles(payload);
+        setMemberProfilesError(null);
+      })
+      .catch((err: Error) => {
+        if (!active) return;
+        setMemberProfilesError(err.message);
       });
 
     return () => {
@@ -1102,7 +1171,11 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                     <div key={memberData.name} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                       <div className="flex items-start justify-between">
                         <div>
-                          <h3 className="text-base font-semibold text-slate-900">{memberData.name}</h3>
+                          <h3 className="text-base font-semibold text-slate-900">
+                            <a href={`#profile-${toAnchorId(memberData.name)}`} className="hover:text-sky-700 hover:underline">
+                              {memberData.name}
+                            </a>
+                          </h3>
                           <p className="text-sm text-slate-500">Total {formatDuration(cardTotalSeconds)}</p>
                         </div>
                         <div className="flex flex-col items-end gap-1">
@@ -1164,6 +1237,165 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {mode === "all" && (
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-900">Member profiles</h2>
+                  <p className="text-sm text-slate-500">
+                    Last 7-day trends, KPI snapshot, work breakdown, and AI insights per teammate.
+                  </p>
+                </div>
+                {memberProfiles?.cachedAt && (
+                  <p className="text-xs text-slate-500">Profile snapshot: {formatDateTime(memberProfiles.cachedAt)}</p>
+                )}
+              </div>
+
+              {memberProfilesError && (
+                <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  {memberProfilesError}
+                </p>
+              )}
+
+              {memberProfiles && (
+                <div className="mt-3 space-y-3">
+                  {(memberProfiles.warning || memberProfiles.stale) && (
+                    <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                      {memberProfiles.warning || "Showing cached member profiles."}
+                    </p>
+                  )}
+                  {memberProfiles.aiWarning && (
+                    <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                      {memberProfiles.aiWarning}
+                    </p>
+                  )}
+                  {!memberProfiles.aiEnabled && (
+                    <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                      AI analysis is off. Add <span className="font-mono">OPENAI_API_KEY</span> to enable automatic insights.
+                    </p>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {memberProfiles.members.map((profile) => (
+                      <a
+                        key={`${profile.name}-jump`}
+                        href={`#profile-${toAnchorId(profile.name)}`}
+                        className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-800 hover:bg-sky-100"
+                      >
+                        {profile.name}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {!memberProfiles && !memberProfilesError && (
+                <p className="mt-3 text-sm text-slate-500">Loading member profiles…</p>
+              )}
+
+              {memberProfiles && (
+                <div className="mt-4 space-y-4">
+                  {memberProfiles.members.map((profile) => {
+                    const maxDaySeconds = profile.days.reduce((max, day) => Math.max(max, day.seconds), 0);
+                    const safeMax = maxDaySeconds > 0 ? maxDaySeconds : 1;
+                    return (
+                      <section
+                        id={`profile-${toAnchorId(profile.name)}`}
+                        key={`profile-${profile.name}`}
+                        className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 scroll-mt-24"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <h3 className="text-base font-semibold text-slate-900">{profile.name}</h3>
+                            <p className="text-sm text-slate-500">
+                              7-day total {formatDuration(profile.totalSeconds)} | {profile.entryCount} entries
+                            </p>
+                          </div>
+                          <a href="#" className="text-xs font-medium text-sky-700 hover:underline">
+                            Back to top
+                          </a>
+                        </div>
+
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                          <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                            <p className="text-[11px] uppercase tracking-wide text-slate-500">Active days</p>
+                            <p className="text-sm font-semibold text-slate-900">{profile.activeDays}/7</p>
+                          </div>
+                          <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                            <p className="text-[11px] uppercase tracking-wide text-slate-500">Avg per day</p>
+                            <p className="text-sm font-semibold text-slate-900">
+                              {formatDuration(profile.averageDailySeconds)}
+                            </p>
+                          </div>
+                          <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                            <p className="text-[11px] uppercase tracking-wide text-slate-500">Avg entry</p>
+                            <p className="text-sm font-semibold text-slate-900">
+                              {formatDuration(profile.averageEntrySeconds)}
+                            </p>
+                          </div>
+                          <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                            <p className="text-[11px] uppercase tracking-wide text-slate-500">Top project share</p>
+                            <p className="text-sm font-semibold text-slate-900">
+                              {profile.topProject} ({profile.topProjectSharePct}%)
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_1.3fr]">
+                          <div className="rounded-lg border border-slate-200 bg-white p-3">
+                            <h4 className="text-sm font-semibold text-slate-800">Last 7 days (vertical bars)</h4>
+                            <div className="mt-3 flex h-44 items-end gap-2">
+                              {profile.days.map((day) => {
+                                const height = Math.max(10, Math.round((day.seconds / safeMax) * 150));
+                                return (
+                                  <div key={`${profile.name}-${day.date}`} className="flex min-w-0 flex-1 flex-col items-center gap-1">
+                                    <div
+                                      className="w-full rounded-t-md bg-gradient-to-t from-cyan-600 to-sky-400"
+                                      style={{ height: `${height}px` }}
+                                      title={`${formatShortDateLabel(day.date)}: ${formatDuration(day.seconds)} (${day.entryCount} entries)`}
+                                    />
+                                    <p className="text-[10px] text-slate-500">{formatShortDateLabel(day.date)}</p>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          <div className="rounded-lg border border-slate-200 bg-white p-3">
+                            <h4 className="text-sm font-semibold text-slate-800">What they worked on</h4>
+                            {profile.workItems.length === 0 && (
+                              <p className="mt-2 text-sm text-slate-500">No work items in the selected 7-day range.</p>
+                            )}
+                            {profile.workItems.length > 0 && (
+                              <div className="mt-2 space-y-2">
+                                {profile.workItems.map((item) => (
+                                  <div key={`${profile.name}-${item.project}-${item.description}`} className="rounded-md bg-slate-50 px-2 py-1">
+                                    <p className="truncate text-sm text-slate-800">
+                                      {item.project} | {item.description}
+                                    </p>
+                                    <p className="text-xs text-slate-500">
+                                      {formatDuration(item.seconds)} | {item.entryCount} entries
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
+                          <h4 className="text-sm font-semibold text-slate-800">AI analysis</h4>
+                          <p className="mt-2 whitespace-pre-line text-sm text-slate-700">
+                            {profile.aiAnalysis || "AI analysis is unavailable for this profile right now."}
+                          </p>
+                        </div>
+                      </section>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
