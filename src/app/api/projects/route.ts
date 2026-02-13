@@ -26,7 +26,6 @@ export async function GET() {
         color: project.project_color || "#0EA5E9",
         totalSeconds: project.total_seconds ?? 0,
         entryCount: project.entry_count ?? 0,
-        source: project.project_key.startsWith("manual:") ? "manual" : "external",
       })),
       source: "db",
     });
@@ -58,7 +57,6 @@ export async function POST(request: NextRequest) {
         key: project.projectKey,
         name: project.projectName,
         color: project.projectColor,
-        source: "manual",
       },
       source: "db",
     });

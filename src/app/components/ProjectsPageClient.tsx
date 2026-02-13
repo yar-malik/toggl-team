@@ -26,7 +26,6 @@ type Project = {
   color: string;
   totalSeconds: number;
   entryCount: number;
-  source: "manual" | "external";
 };
 
 type EditModalState = {
@@ -189,7 +188,6 @@ export default function ProjectsPageClient({ initialProjects }: { initialProject
               <th className="px-6 py-3">Project</th>
               <th className="px-6 py-3">Time status</th>
               <th className="px-6 py-3">Entries</th>
-              <th className="px-6 py-3">Source</th>
               <th className="px-6 py-3 text-right">Edit</th>
             </tr>
           </thead>
@@ -208,7 +206,6 @@ export default function ProjectsPageClient({ initialProjects }: { initialProject
                 </td>
                 <td className="px-6 py-3 text-slate-600">{formatHours(project.totalSeconds || 0)}</td>
                 <td className="px-6 py-3 text-slate-600">{project.entryCount || 0}</td>
-                <td className="px-6 py-3 text-slate-600">{project.source}</td>
                 <td className="px-6 py-3 text-right">
                   <button
                     type="button"
@@ -226,7 +223,7 @@ export default function ProjectsPageClient({ initialProjects }: { initialProject
             ))}
             {sortedProjects.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-6 py-12 text-center text-slate-500">
+                <td colSpan={4} className="px-6 py-12 text-center text-slate-500">
                   No projects yet.
                 </td>
               </tr>

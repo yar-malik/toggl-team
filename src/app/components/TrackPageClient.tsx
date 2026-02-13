@@ -36,7 +36,7 @@ type WeekTotalResponse = {
   error?: string;
 };
 
-type ProjectItem = { key: string; name: string; source: "manual" | "external"; color?: string | null };
+type ProjectItem = { key: string; name: string; color?: string | null };
 type ProjectsResponse = { projects: ProjectItem[]; error?: string };
 
 type CalendarDraft = { hour: number; minute: number };
@@ -280,6 +280,8 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
   const [projectName, setProjectName] = useState("");
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [projectSearch, setProjectSearch] = useState("");
+  const [modalProjectPickerOpen, setModalProjectPickerOpen] = useState(false);
+  const [modalProjectSearch, setModalProjectSearch] = useState("");
   const [quickDurationInput, setQuickDurationInput] = useState("");
   const [quickDurationMode, setQuickDurationMode] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(2);
@@ -288,6 +290,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
   const [entryEditor, setEntryEditor] = useState<EntryEditorState | null>(null);
   const [blockDrag, setBlockDrag] = useState<BlockDragState | null>(null);
   const projectPickerRef = useRef<HTMLDivElement | null>(null);
+  const modalProjectPickerRef = useRef<HTMLDivElement | null>(null);
   const hourHeight = ZOOM_LEVELS[zoomLevel];
 
   useEffect(() => {
@@ -329,6 +332,24 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
       window.removeEventListener("keydown", onEscape);
     };
   }, [projectPickerOpen]);
+
+  useEffect(() => {
+    if (!modalProjectPickerOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!modalProjectPickerRef.current) return;
+      if (modalProjectPickerRef.current.contains(event.target as Node)) return;
+      setModalProjectPickerOpen(false);
+    };
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setModalProjectPickerOpen(false);
+    };
+    window.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("keydown", onEscape);
+    return () => {
+      window.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("keydown", onEscape);
+    };
+  }, [modalProjectPickerOpen]);
 
   useEffect(() => {
     if (!blockDrag) return;
@@ -545,6 +566,12 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
     if (!query) return sorted;
     return sorted.filter((project) => project.name.toLowerCase().includes(query));
   }, [projectSearch, projects]);
+  const filteredModalProjects = useMemo(() => {
+    const query = modalProjectSearch.trim().toLowerCase();
+    const sorted = [...projects].sort((a, b) => a.name.localeCompare(b.name));
+    if (!query) return sorted;
+    return sorted.filter((project) => project.name.toLowerCase().includes(query));
+  }, [modalProjectSearch, projects]);
 
   function emitTimerChanged(detail: { memberName: string; isRunning: boolean; startAt?: string | null; durationSeconds?: number }) {
     window.dispatchEvent(new CustomEvent("voho-timer-changed", { detail }));
@@ -1071,14 +1098,73 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
               />
 
               <div className="flex flex-wrap items-center gap-2.5">
-                <input
-                  type="text"
-                  value={entryEditor.project}
-                  onChange={(event) => setEntryEditor((prev) => (prev ? { ...prev, project: event.target.value } : prev))}
-                  placeholder="Project"
-                  list="project-list"
-                  className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-lg text-sky-900"
-                />
+                <div className="relative" ref={modalProjectPickerRef}>
+                  <button
+                    type="button"
+                    onClick={() => setModalProjectPickerOpen((open) => !open)}
+                    className="inline-flex min-w-[220px] items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-left text-base font-semibold text-sky-900 shadow-sm"
+                  >
+                    <svg viewBox="0 0 24 24" className="h-4 w-4 text-sky-700" fill="currentColor" aria-hidden="true">
+                      <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3l1.5 1.5h8.5A2.5 2.5 0 0 1 21 9v9.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5z" />
+                    </svg>
+                    <span
+                      className="inline-block h-2.5 w-2.5 rounded-full"
+                      style={{ backgroundColor: getProjectBaseColor(entryEditor.project || "No project") }}
+                    />
+                    <span className="max-w-[150px] truncate">{entryEditor.project || "No project"}</span>
+                  </button>
+
+                  {modalProjectPickerOpen && (
+                    <div className="absolute left-0 z-50 mt-2 w-[340px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_18px_48px_rgba(15,23,42,0.24)]">
+                      <div className="border-b border-slate-100 p-3">
+                        <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                          <svg viewBox="0 0 24 24" className="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                            <circle cx="11" cy="11" r="7" />
+                            <path d="m20 20-3.5-3.5" strokeLinecap="round" />
+                          </svg>
+                          <input
+                            type="text"
+                            value={modalProjectSearch}
+                            onChange={(event) => setModalProjectSearch(event.target.value)}
+                            placeholder="Search by project"
+                            className="w-full bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
+                            autoFocus
+                          />
+                        </div>
+                      </div>
+                      <div className="max-h-[280px] overflow-y-auto p-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEntryEditor((prev) => (prev ? { ...prev, project: "" } : prev));
+                            setModalProjectPickerOpen(false);
+                          }}
+                          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-slate-50"
+                        >
+                          <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
+                          <span className="text-sm font-medium text-slate-700">No project</span>
+                        </button>
+                        {filteredModalProjects.map((project) => (
+                          <button
+                            key={project.key}
+                            type="button"
+                            onClick={() => {
+                              setEntryEditor((prev) => (prev ? { ...prev, project: project.name } : prev));
+                              setModalProjectPickerOpen(false);
+                            }}
+                            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-slate-50"
+                          >
+                            <span
+                              className="h-2.5 w-2.5 rounded-full"
+                              style={{ backgroundColor: getProjectBaseColor(project.color || project.name) }}
+                            />
+                            <span className="truncate text-sm font-semibold text-slate-800">{project.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
 
                 <div className="flex items-center gap-2">
                   <input
