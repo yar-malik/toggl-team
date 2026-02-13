@@ -284,6 +284,7 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
             if (!memberName) return;
             setBusy(true);
             try {
+              await persistRunningDraft(description, projectName);
               const res = await fetch("/api/time-entries/stop", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -291,6 +292,8 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
               });
               if (res.ok) {
                 setCurrent(null);
+                setDescription("");
+                setProjectName("");
                 window.dispatchEvent(
                   new CustomEvent("voho-timer-changed", {
                     detail: { memberName, isRunning: false, startAt: null, durationSeconds: 0 },
