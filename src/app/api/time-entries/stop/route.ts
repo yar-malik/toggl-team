@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getTeamMembers } from "@/lib/toggl";
-import { stopManualTimer } from "@/lib/manualTimeEntriesStore";
+import { resolveCanonicalMemberName, stopManualTimer } from "@/lib/manualTimeEntriesStore";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -22,14 +21,14 @@ export async function POST(request: NextRequest) {
   if (!member) {
     return NextResponse.json({ error: "Missing member" }, { status: 400 });
   }
-  const matchedMember = getTeamMembers().find((item) => item.name.toLowerCase() === member.toLowerCase());
-  if (!matchedMember) {
+  const canonicalMember = await resolveCanonicalMemberName(member);
+  if (!canonicalMember) {
     return NextResponse.json({ error: "Unknown member" }, { status: 404 });
   }
 
   try {
     const result = await stopManualTimer({
-      memberName: matchedMember.name,
+      memberName: canonicalMember,
       tzOffsetMinutes: body.tzOffset,
     });
     if (!result.stopped) {

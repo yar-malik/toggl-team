@@ -1,4 +1,5 @@
 import "server-only";
+import { getTeamMembers } from "@/lib/toggl";
 
 type StoredEntryRow = {
   toggl_entry_id: number;
@@ -35,6 +36,19 @@ export type StoredProject = {
   workspace_id: number;
   project_id: number;
   project_name: string;
+};
+
+export type StoredMember = {
+  member_name: string;
+};
+
+export type StoredKpi = {
+  id: number;
+  member_name: string;
+  kpi_label: string;
+  kpi_value: string;
+  notes: string | null;
+  updated_at: string;
 };
 
 function isSupabaseConfigured() {
@@ -155,6 +169,62 @@ export async function createProject(projectName: string) {
   };
 }
 
+export async function listMemberKpis(memberName?: string | null): Promise<StoredKpi[]> {
+  if (!isSupabaseConfigured()) return [];
+  const memberFilter = memberName?.trim() ? `&member_name=eq.${encodeURIComponent(memberName.trim())}` : "";
+  const url =
+    `${getBaseUrl()}/rest/v1/member_kpis` +
+    `?select=id,member_name,kpi_label,kpi_value,notes,updated_at` +
+    `${memberFilter}` +
+    `&order=member_name.asc&order=kpi_label.asc`;
+  const response = await fetch(url, {
+    method: "GET",
+    headers: supabaseHeaders(),
+    cache: "no-store",
+  });
+  if (!response.ok) return [];
+  const rows = (await response.json()) as StoredKpi[];
+  return Array.isArray(rows) ? rows : [];
+}
+
+export async function upsertMemberKpi(input: {
+  memberName: string;
+  label: string;
+  value: string;
+  notes?: string | null;
+}) {
+  const memberName = input.memberName.trim();
+  const label = input.label.trim();
+  const value = input.value.trim();
+  const notes = input.notes?.trim() ?? null;
+  if (!memberName) throw new Error("Member name is required");
+  if (!label) throw new Error("KPI label is required");
+  if (!value) throw new Error("KPI value is required");
+
+  await ensureMember(memberName);
+
+  const payload = [
+    {
+      member_name: memberName,
+      kpi_label: label,
+      kpi_value: value,
+      notes,
+    },
+  ];
+  const response = await fetch(`${getBaseUrl()}/rest/v1/member_kpis?on_conflict=member_name,kpi_label`, {
+    method: "POST",
+    headers: {
+      ...supabaseHeaders(),
+      Prefer: "resolution=merge-duplicates,return=representation",
+    },
+    body: JSON.stringify(payload),
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error("Failed to save KPI");
+  const rows = (await response.json()) as StoredKpi[];
+  return rows[0] ?? null;
+}
+
 async function ensureMember(memberName: string) {
   const payload = [{ member_name: memberName }];
   const response = await fetch(`${getBaseUrl()}/rest/v1/members?on_conflict=member_name`, {
@@ -169,6 +239,40 @@ async function ensureMember(memberName: string) {
   if (!response.ok) {
     throw new Error("Failed to ensure member");
   }
+}
+
+export async function listMembers(): Promise<string[]> {
+  const envMembers = getTeamMembers().map((item) => item.name);
+  if (!isSupabaseConfigured()) {
+    return Array.from(new Set(envMembers)).sort((a, b) => a.localeCompare(b));
+  }
+
+  const response = await fetch(`${getBaseUrl()}/rest/v1/members?select=member_name&order=member_name.asc`, {
+    method: "GET",
+    headers: supabaseHeaders(),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    return Array.from(new Set(envMembers)).sort((a, b) => a.localeCompare(b));
+  }
+  const rows = (await response.json()) as StoredMember[];
+  const dbMembers = rows.map((row) => row.member_name).filter((value) => value && value.trim().length > 0);
+  return Array.from(new Set([...dbMembers, ...envMembers])).sort((a, b) => a.localeCompare(b));
+}
+
+export async function resolveCanonicalMemberName(inputName: string): Promise<string | null> {
+  const normalized = inputName.trim().toLowerCase();
+  if (!normalized) return null;
+  const members = await listMembers();
+  const matched = members.find((name) => name.toLowerCase() === normalized);
+  return matched ?? null;
+}
+
+export async function createMember(memberName: string): Promise<string> {
+  const normalized = memberName.trim();
+  if (!normalized) throw new Error("Member name is required");
+  await ensureMember(normalized);
+  return normalized;
 }
 
 export async function getRunningEntry(memberName: string): Promise<RunningEntry | null> {

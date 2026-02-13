@@ -106,6 +106,17 @@ create table if not exists public.api_quota_locks (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.member_kpis (
+  id bigint generated always as identity primary key,
+  member_name text not null references public.members(member_name) on update cascade,
+  kpi_label text not null,
+  kpi_value text not null,
+  notes text null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (member_name, kpi_label)
+);
+
 drop trigger if exists trg_members_updated_at on public.members;
 create trigger trg_members_updated_at
 before update on public.members
@@ -127,5 +138,11 @@ execute procedure public.set_updated_at();
 drop trigger if exists trg_api_quota_locks_updated_at on public.api_quota_locks;
 create trigger trg_api_quota_locks_updated_at
 before update on public.api_quota_locks
+for each row
+execute procedure public.set_updated_at();
+
+drop trigger if exists trg_member_kpis_updated_at on public.member_kpis;
+create trigger trg_member_kpis_updated_at
+before update on public.member_kpis
 for each row
 execute procedure public.set_updated_at();

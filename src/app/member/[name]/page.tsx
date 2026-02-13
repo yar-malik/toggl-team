@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import MemberProfilePageClient from "@/app/components/MemberProfilePageClient";
-import { getTeamMembers } from "@/lib/toggl";
+import { listMembers } from "@/lib/manualTimeEntriesStore";
 
 function isValidDateInput(value: string | undefined) {
   if (!value) return false;
@@ -22,8 +22,8 @@ export default async function MemberProfilePage({
   } catch {
     notFound();
   }
-  const members = getTeamMembers();
-  const exists = members.some((member) => member.name.toLowerCase() === memberName.toLowerCase());
+  const members = await listMembers();
+  const exists = members.some((member) => member.toLowerCase() === memberName.toLowerCase());
   if (!exists) {
     notFound();
   }

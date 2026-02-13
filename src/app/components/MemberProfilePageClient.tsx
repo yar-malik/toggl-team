@@ -46,6 +46,27 @@ type ProjectsResponse = {
   error?: string;
 };
 
+type MemberItem = { name: string };
+
+type MembersResponse = {
+  members: MemberItem[];
+  error?: string;
+};
+
+type KpiItem = {
+  id: number;
+  member: string;
+  label: string;
+  value: string;
+  notes: string | null;
+  updatedAt: string;
+};
+
+type KpisResponse = {
+  kpis: KpiItem[];
+  error?: string;
+};
+
 type CalendarDraft = {
   hour: number;
   minute: number;
@@ -117,6 +138,8 @@ export default function MemberProfilePageClient({
   const [entriesPayload, setEntriesPayload] = useState<EntriesResponse | null>(null);
   const [currentTimer, setCurrentTimer] = useState<CurrentTimerResponse["current"]>(null);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
+  const [members, setMembers] = useState<MemberItem[]>([]);
+  const [kpis, setKpis] = useState<KpiItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -125,6 +148,10 @@ export default function MemberProfilePageClient({
   const [description, setDescription] = useState("");
   const [projectName, setProjectName] = useState("");
   const [newProjectName, setNewProjectName] = useState("");
+  const [newMemberName, setNewMemberName] = useState("");
+  const [kpiLabel, setKpiLabel] = useState("");
+  const [kpiValue, setKpiValue] = useState("");
+  const [kpiNotes, setKpiNotes] = useState("");
 
   const [calendarDraft, setCalendarDraft] = useState<CalendarDraft | null>(null);
   const [draftDurationMinutes, setDraftDurationMinutes] = useState("60");
@@ -171,12 +198,24 @@ export default function MemberProfilePageClient({
         if (!res.ok || data.error) throw new Error(data.error || "Failed to load projects");
         return data;
       }),
+      fetch(`/api/members?_req=${Date.now()}`, { cache: "no-store" }).then(async (res) => {
+        const data = (await res.json()) as MembersResponse;
+        if (!res.ok || data.error) throw new Error(data.error || "Failed to load members");
+        return data;
+      }),
+      fetch(`/api/kpis?member=${encodeURIComponent(memberName)}&_req=${Date.now()}`, { cache: "no-store" }).then(async (res) => {
+        const data = (await res.json()) as KpisResponse;
+        if (!res.ok || data.error) throw new Error(data.error || "Failed to load KPIs");
+        return data;
+      }),
     ])
-      .then(([entriesData, timerData, projectsData]) => {
+      .then(([entriesData, timerData, projectsData, membersData, kpisData]) => {
         if (!active) return;
         setEntriesPayload(entriesData);
         setCurrentTimer(timerData.current);
         setProjects(projectsData.projects);
+        setMembers(membersData.members);
+        setKpis(kpisData.kpis);
         setError(null);
       })
       .catch((err: Error) => {
@@ -314,10 +353,7 @@ export default function MemberProfilePageClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name }),
       });
-      const data = (await res.json()) as {
-        error?: string;
-        project?: ProjectItem;
-      };
+      const data = (await res.json()) as { error?: string; project?: ProjectItem };
       if (!res.ok || data.error) throw new Error(data.error || "Failed to create project");
       if (data.project) {
         setProjects((prev) => {
@@ -334,6 +370,72 @@ export default function MemberProfilePageClient({
     }
   };
 
+  const createNewMember = async () => {
+    const name = newMemberName.trim();
+    if (!name) {
+      setActionError("Member name is required");
+      return;
+    }
+    setBusy(true);
+    setActionError(null);
+    try {
+      const res = await fetch("/api/members", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const data = (await res.json()) as { error?: string; member?: MemberItem };
+      if (!res.ok || data.error) throw new Error(data.error || "Failed to create member");
+      if (data.member) {
+        setMembers((prev) => {
+          if (prev.some((item) => item.name.toLowerCase() === data.member!.name.toLowerCase())) return prev;
+          return [...prev, data.member!].sort((a, b) => a.name.localeCompare(b.name));
+        });
+      }
+      setNewMemberName("");
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to create member");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveKpi = async () => {
+    if (!kpiLabel.trim() || !kpiValue.trim()) {
+      setActionError("KPI label and value are required");
+      return;
+    }
+    setBusy(true);
+    setActionError(null);
+    try {
+      const res = await fetch("/api/kpis", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          member: memberName,
+          label: kpiLabel,
+          value: kpiValue,
+          notes: kpiNotes,
+        }),
+      });
+      const data = (await res.json()) as { error?: string; kpi?: KpiItem };
+      if (!res.ok || data.error) throw new Error(data.error || "Failed to save KPI");
+      if (data.kpi) {
+        setKpis((prev) => {
+          const without = prev.filter((item) => item.label.toLowerCase() !== data.kpi!.label.toLowerCase());
+          return [...without, data.kpi!].sort((a, b) => a.label.localeCompare(b.label));
+        });
+      }
+      setKpiLabel("");
+      setKpiValue("");
+      setKpiNotes("");
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to save KPI");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#f4f6fb]">
       <div className="mx-auto flex w-full max-w-[1700px] gap-4 px-4 py-4 md:px-6">
@@ -341,21 +443,15 @@ export default function MemberProfilePageClient({
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Voho Tracker</p>
           <h2 className="mt-2 text-xl font-semibold text-slate-900">{memberName}</h2>
           <nav className="mt-6 space-y-2 text-sm">
-            <a href="#track" className="block rounded-lg bg-slate-900 px-3 py-2 font-medium text-white">
-              Track
-            </a>
-            <a href="#calendar" className="block rounded-lg px-3 py-2 font-medium text-slate-700 hover:bg-slate-100">
-              Calendar
-            </a>
-            <a href="#projects" className="block rounded-lg px-3 py-2 font-medium text-slate-700 hover:bg-slate-100">
-              Projects
-            </a>
-            <a href="#insights" className="block rounded-lg px-3 py-2 font-medium text-slate-700 hover:bg-slate-100">
-              Insights
-            </a>
+            <a href="#track" className="block rounded-lg bg-slate-900 px-3 py-2 font-medium text-white">Track</a>
+            <a href="#calendar" className="block rounded-lg px-3 py-2 font-medium text-slate-700 hover:bg-slate-100">Calendar</a>
+            <a href="#projects" className="block rounded-lg px-3 py-2 font-medium text-slate-700 hover:bg-slate-100">Projects</a>
+            <a href="#members" className="block rounded-lg px-3 py-2 font-medium text-slate-700 hover:bg-slate-100">Members</a>
+            <a href="#kpis" className="block rounded-lg px-3 py-2 font-medium text-slate-700 hover:bg-slate-100">KPIs</a>
+            <a href="#insights" className="block rounded-lg px-3 py-2 font-medium text-slate-700 hover:bg-slate-100">Insights</a>
           </nav>
           <div className="mt-8 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-            Data source: Supabase first. Toggl only used by refresh APIs, not by this tracker flow.
+            Data source: Supabase first. This tracker works without Google Sheets.
           </div>
           <Link href="/" className="mt-4 inline-block rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700">
             Back to dashboard
@@ -497,7 +593,7 @@ export default function MemberProfilePageClient({
                       key={block.id}
                       className="absolute left-24 right-3 overflow-hidden rounded-lg border border-cyan-200 bg-cyan-100/90 px-2 py-1 text-xs shadow-sm"
                       style={{ top: `${block.top}px`, height: `${Math.max(22, block.height)}px` }}
-                      title={`${block.timeRange}`}
+                      title={block.timeRange}
                     >
                       <p className="truncate font-semibold text-slate-900">{block.description}</p>
                       <p className="truncate text-slate-700">{block.project}</p>
@@ -528,7 +624,7 @@ export default function MemberProfilePageClient({
                     Add
                   </button>
                 </div>
-                <div className="mt-3 max-h-[340px] space-y-2 overflow-auto pr-1">
+                <div className="mt-3 max-h-[260px] space-y-2 overflow-auto pr-1">
                   {projects.length === 0 && <p className="text-sm text-slate-500">No projects yet.</p>}
                   {projects.map((project) => (
                     <button
@@ -540,6 +636,84 @@ export default function MemberProfilePageClient({
                       <span className="truncate text-sm text-slate-900">{project.name}</span>
                       <span className="ml-2 shrink-0 rounded bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">{project.source}</span>
                     </button>
+                  ))}
+                </div>
+              </section>
+
+              <section id="members" className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5">
+                <h2 className="text-lg font-semibold text-slate-900">Members</h2>
+                <div className="mt-3 flex gap-2">
+                  <input
+                    type="text"
+                    value={newMemberName}
+                    onChange={(event) => setNewMemberName(event.target.value)}
+                    placeholder="Add member"
+                    className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={createNewMember}
+                    disabled={busy}
+                    className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+                  >
+                    Add
+                  </button>
+                </div>
+                <div className="mt-3 max-h-[170px] space-y-2 overflow-auto pr-1">
+                  {members.length === 0 && <p className="text-sm text-slate-500">No members yet.</p>}
+                  {members.map((member) => (
+                    <Link
+                      key={member.name}
+                      href={`/member/${encodeURIComponent(member.name)}?date=${encodeURIComponent(date)}`}
+                      className="block rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 hover:bg-slate-50"
+                    >
+                      {member.name}
+                    </Link>
+                  ))}
+                </div>
+              </section>
+
+              <section id="kpis" className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5">
+                <h2 className="text-lg font-semibold text-slate-900">KPIs ({memberName})</h2>
+                <div className="mt-3 space-y-2">
+                  <input
+                    type="text"
+                    value={kpiLabel}
+                    onChange={(event) => setKpiLabel(event.target.value)}
+                    placeholder="KPI label"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                  <input
+                    type="text"
+                    value={kpiValue}
+                    onChange={(event) => setKpiValue(event.target.value)}
+                    placeholder="KPI value"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                  <textarea
+                    value={kpiNotes}
+                    onChange={(event) => setKpiNotes(event.target.value)}
+                    placeholder="Optional notes"
+                    rows={2}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={saveKpi}
+                    disabled={busy}
+                    className="w-full rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+                  >
+                    Save KPI
+                  </button>
+                </div>
+                <div className="mt-3 max-h-[180px] space-y-2 overflow-auto pr-1">
+                  {kpis.length === 0 && <p className="text-sm text-slate-500">No KPIs yet for this member.</p>}
+                  {kpis.map((kpi) => (
+                    <div key={`${kpi.id}-${kpi.label}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                      <p className="text-xs uppercase tracking-wide text-slate-500">{kpi.label}</p>
+                      <p className="text-sm font-semibold text-slate-900">{kpi.value}</p>
+                      {kpi.notes && <p className="mt-1 text-xs text-slate-600">{kpi.notes}</p>}
+                    </div>
                   ))}
                 </div>
               </section>

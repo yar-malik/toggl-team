@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getTeamMembers } from "@/lib/toggl";
-import { getRunningEntry } from "@/lib/manualTimeEntriesStore";
+import { getRunningEntry, resolveCanonicalMemberName } from "@/lib/manualTimeEntriesStore";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -12,15 +11,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Missing member" }, { status: 400 });
   }
 
-  const matchedMember = getTeamMembers().find((item) => item.name.toLowerCase() === member.toLowerCase());
-  if (!matchedMember) {
+  const canonicalMember = await resolveCanonicalMemberName(member);
+  if (!canonicalMember) {
     return NextResponse.json({ error: "Unknown member" }, { status: 404 });
   }
 
   try {
-    const entry = await getRunningEntry(matchedMember.name);
+    const entry = await getRunningEntry(canonicalMember);
     return NextResponse.json({
-      member: matchedMember.name,
+      member: canonicalMember,
       current: entry,
       cachedAt: new Date().toISOString(),
       source: "db",
