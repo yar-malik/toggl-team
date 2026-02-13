@@ -185,7 +185,45 @@ function buildCalendarBlock(entry: TimeEntry, dayStartMs: number) {
     startIso: entry.start,
     stopIso: entry.stop,
     durationSeconds: Math.max(0, entry.duration),
+    startMinute: minutesFromStart,
+    endMinute: minutesFromStart + durationMinutes,
   };
+}
+
+type CalendarBlock = NonNullable<ReturnType<typeof buildCalendarBlock>>;
+
+function layoutCalendarBlocks(blocks: CalendarBlock[]) {
+  const sorted = [...blocks].sort((a, b) => a.startMinute - b.startMinute || a.endMinute - b.endMinute);
+  const laidOut: Array<CalendarBlock & { column: number; laneCount: number; groupId: number }> = [];
+
+  let active: Array<{ endMinute: number; column: number; index: number }> = [];
+  let currentGroupId = -1;
+  const groupMaxColumns = new Map<number, number>();
+
+  for (const block of sorted) {
+    active = active.filter((item) => item.endMinute > block.startMinute);
+
+    if (active.length === 0) {
+      currentGroupId += 1;
+    }
+
+    const usedColumns = new Set(active.map((item) => item.column));
+    let column = 0;
+    while (usedColumns.has(column)) column += 1;
+
+    const index = laidOut.length;
+    laidOut.push({ ...block, column, laneCount: 1, groupId: currentGroupId });
+    active.push({ endMinute: block.endMinute, column, index });
+
+    const maxColumnForGroup = groupMaxColumns.get(currentGroupId) ?? 0;
+    groupMaxColumns.set(currentGroupId, Math.max(maxColumnForGroup, column + 1));
+  }
+
+  for (const block of laidOut) {
+    block.laneCount = groupMaxColumns.get(block.groupId) ?? 1;
+  }
+
+  return laidOut;
 }
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
@@ -245,6 +283,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
   const [description, setDescription] = useState("");
   const [projectName, setProjectName] = useState("");
   const [quickDurationInput, setQuickDurationInput] = useState("");
+  const [quickDurationMode, setQuickDurationMode] = useState(false);
   const [calendarDraft, setCalendarDraft] = useState<CalendarDraft | null>(null);
   const [draftDurationMinutes, setDraftDurationMinutes] = useState("60");
   const [entryEditor, setEntryEditor] = useState<EntryEditorState | null>(null);
@@ -264,6 +303,12 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
     const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!currentTimer) {
+      setQuickDurationMode(false);
+    }
+  }, [currentTimer]);
 
   useEffect(() => {
     let active = true;
@@ -352,10 +397,11 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
   const weekDays = useMemo(() => buildWeekDays(date), [date]);
   const dayStartMs = useMemo(() => new Date(`${date}T00:00:00`).getTime(), [date]);
   const calendarBlocks = useMemo(() => {
-    return (entries?.entries ?? [])
+    const blocks = (entries?.entries ?? [])
       .map((entry) => buildCalendarBlock(entry, dayStartMs))
       .filter((item): item is NonNullable<typeof item> => item !== null)
       .sort((a, b) => a.top - b.top);
+    return layoutCalendarBlocks(blocks);
   }, [entries?.entries, dayStartMs]);
 
   const nowMarkerTop = useMemo(() => {
@@ -406,6 +452,20 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
     setRefreshTick((v) => v + 1);
   }
 
+  async function handleQuickDurationSubmit() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await createQuickDurationEntry(quickDurationInput);
+      setQuickDurationMode(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add entry");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-200 px-5 py-4">
@@ -434,9 +494,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
               ))}
             </datalist>
 
-            {currentTimer ? (
-              <p className="min-w-[95px] text-right text-3xl font-semibold tabular-nums text-slate-900">{formatTimer(runningSeconds)}</p>
-            ) : (
+            {!currentTimer || quickDurationMode ? (
               <input
                 type="text"
                 value={quickDurationInput}
@@ -444,21 +502,25 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
                 onKeyDown={async (event) => {
                   if (event.key !== "Enter") return;
                   event.preventDefault();
-                  if (busy) return;
-                  setBusy(true);
-                  setError(null);
-                  try {
-                    await createQuickDurationEntry(quickDurationInput);
-                  } catch (err) {
-                    setError(err instanceof Error ? err.message : "Failed to add entry");
-                  } finally {
-                    setBusy(false);
-                  }
+                  await handleQuickDurationSubmit();
                 }}
+                onBlur={() => {
+                  if (currentTimer) setQuickDurationMode(false);
+                }}
+                autoFocus={quickDurationMode}
                 placeholder="15m"
                 className="w-[110px] rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-right text-2xl font-semibold tabular-nums text-slate-900 outline-none focus:border-sky-400"
                 title="Type duration: 15m, 20 min, 1h 30m, 1:15, or 90"
               />
+            ) : (
+              <button
+                type="button"
+                onClick={() => setQuickDurationMode(true)}
+                className="min-w-[95px] text-right text-3xl font-semibold tabular-nums text-slate-900 transition hover:text-blue-700"
+                title="Click to type duration like 15m or 1h 20m"
+              >
+                {formatTimer(runningSeconds)}
+              </button>
             )}
 
             <button
@@ -685,10 +747,12 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
                       error: null,
                     })
                   }
-                  className="absolute left-24 right-8 overflow-hidden rounded-lg border px-2 py-1 text-left text-xs shadow-sm"
+                  className="absolute overflow-hidden rounded-lg border px-2 py-1 text-left text-xs shadow-sm"
                   style={{
                     top: `${block.top}px`,
                     height: `${Math.max(22, block.height)}px`,
+                    left: `calc(6rem + ${block.column} * ((100% - 8rem) / ${block.laneCount}))`,
+                    width: `calc(((100% - 8rem) / ${block.laneCount}) - 4px)`,
                     ...getPastelProjectStyle(block.project, block.projectColor),
                   }}
                 >
