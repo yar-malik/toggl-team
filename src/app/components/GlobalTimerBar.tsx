@@ -76,25 +76,24 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
 
   useEffect(() => {
     if (!current || !memberName) return;
-    const handle = window.setTimeout(async () => {
-      const draft = latestDraftRef.current;
-      try {
-        await fetch("/api/time-entries/current", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            member: memberName,
-            description: draft.description,
-            project: draft.projectName,
-          }),
-        });
-      } catch {
-        // Best-effort.
-      }
-    }, 280);
+    const controller = new AbortController();
+    const draft = latestDraftRef.current;
 
-    return () => window.clearTimeout(handle);
-  }, [current, description, projectName, memberName]);
+    void fetch("/api/time-entries/current", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        member: memberName,
+        description: draft.description,
+        project: draft.projectName,
+      }),
+      signal: controller.signal,
+    }).catch(() => {
+      // Best-effort.
+    });
+
+    return () => controller.abort();
+  }, [current?.id, description, projectName, memberName]);
 
   useEffect(() => {
     if (!pickerOpen) return;

@@ -55,46 +55,6 @@ const MIN_ENTRY_MINUTES = 15;
 const DRAG_SNAP_MINUTES = 5;
 const ZOOM_LEVELS = [40, 48, 56, 68, 80] as const;
 
-function formatTimer(totalSeconds: number): string {
-  const safe = Math.max(0, Math.floor(totalSeconds));
-  const h = Math.floor(safe / 3600);
-  const m = Math.floor((safe % 3600) / 60);
-  const s = safe % 60;
-  return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
-
-function parseDurationInputToMinutes(input: string): number | null {
-  const value = input.trim().toLowerCase();
-  if (!value) return null;
-
-  if (/^\d+$/.test(value)) {
-    const minutes = Number(value);
-    return Number.isFinite(minutes) && minutes > 0 ? minutes : null;
-  }
-
-  if (/^\d{1,2}:\d{1,2}$/.test(value)) {
-    const [h, m] = value.split(":").map(Number);
-    const minutes = h * 60 + m;
-    return Number.isFinite(minutes) && minutes > 0 ? minutes : null;
-  }
-
-  let totalMinutes = 0;
-  const hourMatches = value.match(/(\d+)\s*h(?:our|ours)?/g) ?? [];
-  const minuteMatches = value.match(/(\d+)\s*m(?:in|ins|inute|inutes)?/g) ?? [];
-
-  for (const match of hourMatches) {
-    const parsed = Number(match.match(/\d+/)?.[0] ?? 0);
-    totalMinutes += parsed * 60;
-  }
-  for (const match of minuteMatches) {
-    const parsed = Number(match.match(/\d+/)?.[0] ?? 0);
-    totalMinutes += parsed;
-  }
-
-  if (totalMinutes > 0) return totalMinutes;
-  return null;
-}
-
 function formatLocalDateInput(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
@@ -626,8 +586,8 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
                           member: memberName,
-                          description,
-                          project: projectName,
+                          description: "",
+                          project: "",
                           startAt,
                           durationMinutes: mins,
                           tzOffset: new Date().getTimezoneOffset(),
