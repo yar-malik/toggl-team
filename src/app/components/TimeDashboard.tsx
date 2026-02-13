@@ -399,7 +399,13 @@ function getTaskSummaryTooltip(item: TaskProjectSummaryRow) {
   ].join("\n");
 }
 
-export default function TimeDashboard({ members }: { members: Member[] }) {
+export default function TimeDashboard({
+  members,
+  initialMode = "all",
+}: {
+  members: Member[];
+  initialMode?: "all" | "team";
+}) {
   const defaultMember = members[0]?.name ?? "";
   const [member, setMember] = useState(defaultMember);
   const [date, setDate] = useState(formatDateInput(new Date()));
@@ -431,6 +437,10 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
   const allCalendarsScrollRef = useRef<HTMLDivElement | null>(null);
 
   const hasMembers = members.length > 0;
+
+  useEffect(() => {
+    setMode(initialMode);
+  }, [initialMode]);
 
   useEffect(() => {
     const storedFilters = localStorage.getItem(FILTERS_KEY);

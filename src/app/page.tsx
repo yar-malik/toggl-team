@@ -1,27 +1,22 @@
-import TimeDashboard from "@/app/components/TimeDashboard";
-import { getTeamMembers } from "@/lib/toggl";
+import { cookies } from "next/headers";
+import PlatformHomeClient from "@/app/components/PlatformHomeClient";
+import { listMemberKpis, listMemberProfiles, listProjects } from "@/lib/manualTimeEntriesStore";
 
-export default function Home() {
-  const members = getTeamMembers();
+export default async function Home() {
+  const [members, projects, kpis, cookieStore] = await Promise.all([
+    listMemberProfiles(),
+    listProjects(),
+    listMemberKpis(),
+    cookies(),
+  ]);
+  const currentUserEmail = cookieStore.get("voho_user_email")?.value ?? null;
 
   return (
-    <div className="min-h-screen bg-[#EDFDF5]">
-      <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-8 px-8 py-8 md:px-10">
-        <header className="space-y-3">
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-700">
-            Voho Team Overview
-          </p>
-          <h1 className="text-3xl font-semibold text-slate-900 md:text-4xl">
-            Track daily activity without hopping between accounts.
-          </h1>
-          <p className="max-w-2xl text-base text-slate-600">
-            Pick a teammate and date to see their logged time, running timer, and daily summary.
-            Tokens stay server-side for safety.
-          </p>
-        </header>
-
-        <TimeDashboard members={members} />
-      </main>
-    </div>
+    <PlatformHomeClient
+      members={members.map((m) => ({ name: m.name, email: m.email, role: m.role }))}
+      projects={projects.map((p) => ({ key: p.project_key, name: p.project_name, source: p.project_key.startsWith("manual:") ? "manual" : "external" }))}
+      kpis={kpis.map((k) => ({ id: k.id, member: k.member_name, label: k.kpi_label, value: k.kpi_value, notes: k.notes }))}
+      currentUserEmail={currentUserEmail}
+    />
   );
 }

@@ -40,6 +40,8 @@ export type StoredProject = {
 
 export type StoredMember = {
   member_name: string;
+  email?: string | null;
+  role?: string | null;
 };
 
 export type StoredKpi = {
@@ -260,6 +262,42 @@ export async function listMembers(): Promise<string[]> {
   return Array.from(new Set([...dbMembers, ...envMembers])).sort((a, b) => a.localeCompare(b));
 }
 
+export async function listMemberProfiles(): Promise<Array<{ name: string; email: string | null; role: string | null }>> {
+  const envMembers = getTeamMembers().map((item) => item.name);
+  if (!isSupabaseConfigured()) {
+    return Array.from(new Set(envMembers))
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => ({ name, email: null, role: "member" }));
+  }
+
+  const response = await fetch(`${getBaseUrl()}/rest/v1/members?select=member_name,email,role&order=member_name.asc`, {
+    method: "GET",
+    headers: supabaseHeaders(),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    return Array.from(new Set(envMembers))
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => ({ name, email: null, role: "member" }));
+  }
+  const rows = (await response.json()) as StoredMember[];
+  const map = new Map<string, { name: string; email: string | null; role: string | null }>();
+  for (const row of rows) {
+    if (!row.member_name) continue;
+    map.set(row.member_name, {
+      name: row.member_name,
+      email: row.email ?? null,
+      role: row.role ?? "member",
+    });
+  }
+  for (const name of envMembers) {
+    if (!map.has(name)) {
+      map.set(name, { name, email: null, role: "member" });
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export async function resolveCanonicalMemberName(inputName: string): Promise<string | null> {
   const normalized = inputName.trim().toLowerCase();
   if (!normalized) return null;
@@ -273,6 +311,30 @@ export async function createMember(memberName: string): Promise<string> {
   if (!normalized) throw new Error("Member name is required");
   await ensureMember(normalized);
   return normalized;
+}
+
+export async function upsertMemberProfile(input: {
+  name: string;
+  email?: string | null;
+  role?: string | null;
+}) {
+  const name = input.name.trim();
+  if (!name) throw new Error("Member name is required");
+  const email = input.email?.trim() || null;
+  const role = input.role?.trim() || "member";
+  const payload = [{ member_name: name, email, role }];
+  const response = await fetch(`${getBaseUrl()}/rest/v1/members?on_conflict=member_name`, {
+    method: "POST",
+    headers: {
+      ...supabaseHeaders(),
+      Prefer: "resolution=merge-duplicates,return=representation",
+    },
+    body: JSON.stringify(payload),
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error("Failed to save member profile");
+  const rows = (await response.json()) as Array<{ member_name: string; email: string | null; role: string | null }>;
+  return rows[0] ?? { member_name: name, email, role };
 }
 
 export async function getRunningEntry(memberName: string): Promise<RunningEntry | null> {

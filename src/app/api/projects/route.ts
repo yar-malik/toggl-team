@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createProject, listProjects } from "@/lib/manualTimeEntriesStore";
+import { requireAdminOrThrow } from "@/lib/authorization";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -39,6 +40,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    await requireAdminOrThrow();
     const project = await createProject(name);
     return NextResponse.json({
       ok: true,
@@ -54,4 +56,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-

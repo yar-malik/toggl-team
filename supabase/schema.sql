@@ -26,6 +26,8 @@ create index if not exists idx_cache_snapshots_expires_at
 
 create table if not exists public.members (
   member_name text primary key,
+  email text null unique,
+  role text not null default 'member',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
