@@ -7,11 +7,9 @@ import {
   getTokenForMember,
   sortEntriesByStart,
 } from "@/lib/toggl";
-import { getCacheSnapshot, setCacheSnapshot } from "@/lib/cacheStore";
 import { persistHistoricalError, persistHistoricalSnapshot } from "@/lib/historyStore";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const CACHE_TTL_MS = 10 * 60 * 1000;
 
 type MemberPayload = {
   name: string;
@@ -20,13 +18,30 @@ type MemberPayload = {
   totalSeconds: number;
 };
 
-type CacheEntry = {
-  date: string;
-  members: MemberPayload[];
-  cachedAt: string;
-  quotaRemaining?: string | null;
-  quotaResetsIn?: string | null;
+type StoredEntryRow = {
+  member_name: string;
+  toggl_entry_id: number;
+  description: string | null;
+  start_at: string;
+  stop_at: string | null;
+  duration_seconds: number;
+  tags: string[] | null;
+  project_key: string | null;
+  synced_at: string;
 };
+
+function isSupabaseConfigured() {
+  return Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+}
+
+function supabaseHeaders() {
+  const token = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  return {
+    apikey: token,
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+}
 
 function parseTzOffsetMinutes(value: string | null): number {
   const parsed = Number(value);
@@ -44,6 +59,95 @@ function buildUtcDayRange(dateInput: string, tzOffsetMinutes: number) {
   return { startDate: new Date(startMs).toISOString(), endDate: new Date(endMs).toISOString() };
 }
 
+async function readStoredTeam(
+  members: Array<{ name: string }>,
+  startIso: string,
+  endIso: string
+): Promise<{ members: MemberPayload[]; cachedAt: string } | null> {
+  if (!isSupabaseConfigured()) return null;
+  if (members.length === 0) return { members: [], cachedAt: new Date().toISOString() };
+
+  const base = process.env.SUPABASE_URL!;
+  const quotedMembers = members
+    .map((member) => `"${member.name.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`)
+    .join(",");
+  const memberFilter = `in.(${quotedMembers})`;
+  const url =
+    `${base}/rest/v1/time_entries` +
+    `?select=member_name,toggl_entry_id,description,start_at,stop_at,duration_seconds,tags,project_key,synced_at` +
+    `&member_name=${encodeURIComponent(memberFilter)}` +
+    `&start_at=gte.${encodeURIComponent(startIso)}` +
+    `&start_at=lte.${encodeURIComponent(endIso)}` +
+    `&order=start_at.asc`;
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: supabaseHeaders(),
+    cache: "no-store",
+  });
+  if (!response.ok) return null;
+  const rows = (await response.json()) as StoredEntryRow[];
+
+  const projectKeys = Array.from(
+    new Set(rows.map((row) => row.project_key).filter((value): value is string => typeof value === "string" && value.length > 0))
+  );
+  const projectNameByKey = new Map<string, string>();
+  if (projectKeys.length > 0) {
+    const projectFilter = `in.(${projectKeys.map((key) => `"${key.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")})`;
+    const projectsUrl = `${base}/rest/v1/projects?select=project_key,project_name&project_key=${encodeURIComponent(projectFilter)}`;
+    const projectsResponse = await fetch(projectsUrl, {
+      method: "GET",
+      headers: supabaseHeaders(),
+      cache: "no-store",
+    });
+    if (projectsResponse.ok) {
+      const projectRows = (await projectsResponse.json()) as Array<{ project_key: string; project_name: string }>;
+      for (const row of projectRows) {
+        if (!row.project_key) continue;
+        projectNameByKey.set(row.project_key, row.project_name);
+      }
+    }
+  }
+
+  const grouped = new Map<string, MemberPayload>(
+    members.map((member) => [member.name, { name: member.name, entries: [], current: null, totalSeconds: 0 }])
+  );
+
+  let latestSyncedAt: string | null = null;
+  for (const row of rows) {
+    latestSyncedAt = latestSyncedAt ? (row.synced_at > latestSyncedAt ? row.synced_at : latestSyncedAt) : row.synced_at;
+    const bucket = grouped.get(row.member_name);
+    if (!bucket) continue;
+    const entry = {
+      id: row.toggl_entry_id,
+      description: row.description,
+      start: row.start_at,
+      stop: row.stop_at,
+      duration: row.duration_seconds,
+      tags: row.tags ?? [],
+      project_name: row.project_key ? projectNameByKey.get(row.project_key) ?? null : null,
+    };
+    bucket.entries.push(entry);
+    bucket.totalSeconds += Math.max(0, row.duration_seconds);
+  }
+
+  const payloadMembers = Array.from(grouped.values()).map((member) => ({
+    ...member,
+    entries: sortEntriesByStart(member.entries),
+  }));
+  if (rows.length === 0) {
+    return {
+      members: payloadMembers,
+      cachedAt: new Date().toISOString(),
+    };
+  }
+
+  return {
+    members: payloadMembers,
+    cachedAt: latestSyncedAt ?? new Date().toISOString(),
+  };
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const dateParam = searchParams.get("date");
@@ -55,34 +159,36 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Invalid date" }, { status: 400 });
   }
 
-  const cacheKey = `team::${dateInput}`;
-  const cachedFresh = await getCacheSnapshot<CacheEntry>(cacheKey, false);
-  const cachedAny = await getCacheSnapshot<CacheEntry>(cacheKey, true);
   const members = getTeamMembers();
   if (members.length === 0) {
     return NextResponse.json({ error: "No members configured" }, { status: 400 });
   }
-  if (!forceRefresh && cachedFresh) {
-    return NextResponse.json({ ...cachedFresh, stale: false, warning: null });
-  }
-  if (!forceRefresh && cachedAny) {
-    return NextResponse.json({
-      ...cachedAny,
-      stale: true,
-      warning: "Showing last cached snapshot. Click Refresh view to fetch newer data.",
-    });
-  }
-  if (!forceRefresh && !cachedAny) {
-    return NextResponse.json({
-      date: dateInput,
-      members: members.map((member) => ({ name: member.name, entries: [], current: null, totalSeconds: 0 })),
-      cachedAt: new Date().toISOString(),
-      stale: true,
-      warning: "No cached snapshot yet. Click Refresh view to load data.",
-    });
-  }
 
   const { startDate, endDate } = buildUtcDayRange(dateInput, tzOffsetMinutes);
+
+  if (!forceRefresh) {
+    const stored = await readStoredTeam(members, startDate, endDate);
+    if (!stored) {
+      return NextResponse.json({ error: "Supabase history is not configured" }, { status: 500 });
+    }
+    const hasData = stored.members.some((member) => member.entries.length > 0);
+    if (!hasData) {
+      return NextResponse.json({
+        date: dateInput,
+        members: stored.members,
+        cachedAt: stored.cachedAt,
+        stale: true,
+        warning: "No stored team entries for this day yet. Click Refresh now to import and save from Toggl.",
+      });
+    }
+    return NextResponse.json({
+      date: dateInput,
+      members: stored.members,
+      cachedAt: stored.cachedAt,
+      stale: false,
+      warning: null,
+    });
+  }
 
   try {
     const results = await Promise.all(
@@ -103,8 +209,7 @@ export async function GET(request: NextRequest) {
           if (entry.duration >= 0) return acc + entry.duration;
           const startedAt = new Date(entry.start).getTime();
           if (Number.isNaN(startedAt)) return acc;
-          const runningSeconds = Math.floor((Date.now() - startedAt) / 1000);
-          return acc + runningSeconds;
+          return acc + Math.floor((Date.now() - startedAt) / 1000);
         }, 0);
 
         await persistHistoricalSnapshot("team", member.name, dateInput, sortedEntries);
@@ -112,58 +217,30 @@ export async function GET(request: NextRequest) {
       })
     );
 
-    const payload: CacheEntry = { date: dateInput, members: results, cachedAt: new Date().toISOString() };
-    await setCacheSnapshot(cacheKey, payload, CACHE_TTL_MS);
-    return NextResponse.json({ ...payload, stale: false, warning: null });
+    return NextResponse.json({
+      date: dateInput,
+      members: results,
+      cachedAt: new Date().toISOString(),
+      stale: false,
+      warning: null,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     const status = (error as Error & { status?: number }).status ?? 502;
-    const retryAfter = (error as Error & { retryAfter?: string | null }).retryAfter ?? null;
     const quotaRemaining = (error as Error & { quotaRemaining?: string | null }).quotaRemaining ?? null;
     const quotaResetsIn = (error as Error & { quotaResetsIn?: string | null }).quotaResetsIn ?? null;
 
-    if (status === 402) {
-      if (cachedAny) {
-        return NextResponse.json({
-          ...cachedAny,
-          stale: true,
-          warning: "Quota reached. Showing last cached snapshot. Try refresh again after reset.",
-          quotaRemaining,
-          quotaResetsIn,
-        });
-      }
-      return NextResponse.json(
-        {
-          error: "Toggl API quota reached. Please wait for reset before retrying.",
-          quotaRemaining,
-          quotaResetsIn,
-        },
-        { status: 402, headers: quotaResetsIn ? { "X-Toggl-Quota-Resets-In": quotaResetsIn } : undefined }
-      );
-    }
-
-    if (status === 429) {
-      if (cachedAny) {
-        return NextResponse.json({
-          ...cachedAny,
-          stale: true,
-          warning: "Rate limited. Showing last cached snapshot.",
-          quotaRemaining,
-          quotaResetsIn,
-        });
-      }
-      return NextResponse.json(
-        { error: "Rate limited by Toggl. Please retry shortly.", retryAfter, quotaRemaining, quotaResetsIn },
-        { status: 429, headers: retryAfter ? { "Retry-After": retryAfter } : undefined }
-      );
-    }
-
-    if (cachedAny) {
+    const stored = await readStoredTeam(members, startDate, endDate);
+    if (stored) {
       await persistHistoricalError("team", null, dateInput, message);
       return NextResponse.json({
-        ...cachedAny,
+        date: dateInput,
+        members: stored.members,
+        cachedAt: stored.cachedAt,
         stale: true,
-        warning: "Toggl is unavailable. Showing last cached snapshot.",
+        warning: "Toggl refresh failed. Showing stored team data from Supabase.",
+        quotaRemaining,
+        quotaResetsIn,
       });
     }
 

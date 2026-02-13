@@ -6,11 +6,9 @@ import {
   getTeamMembers,
   getTokenForMember,
 } from "@/lib/toggl";
-import { getCacheSnapshot, setCacheSnapshot } from "@/lib/cacheStore";
-import { persistHistoricalError, persistWeeklyRollup } from "@/lib/historyStore";
+import { persistHistoricalError, persistHistoricalSnapshot, persistWeeklyRollup } from "@/lib/historyStore";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const CACHE_TTL_MS = 30 * 60 * 1000;
 const EXCLUDED_PROJECT_NAME = "non-work-task";
 
 type DaySummary = {
@@ -26,15 +24,26 @@ type MemberWeekPayload = {
   days: DaySummary[];
 };
 
-type CacheEntry = {
-  startDate: string;
-  endDate: string;
-  weekDates: string[];
-  members: MemberWeekPayload[];
-  cachedAt: string;
-  quotaRemaining?: string | null;
-  quotaResetsIn?: string | null;
+type StoredStatRow = {
+  stat_date: string;
+  member_name: string;
+  total_seconds: number;
+  entry_count: number;
+  updated_at: string;
 };
+
+function isSupabaseConfigured() {
+  return Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+}
+
+function supabaseHeaders() {
+  const token = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  return {
+    apikey: token,
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+}
 
 function getEntrySeconds(entry: Awaited<ReturnType<typeof fetchTimeEntries>>[number]) {
   if (entry.duration >= 0) return entry.duration;
@@ -75,6 +84,70 @@ function buildUtcRangeFromLocalDates(startDate: string, endDate: string, tzOffse
   return { startIso: new Date(startMs).toISOString(), endIso: new Date(endMs).toISOString() };
 }
 
+async function readStoredWeek(
+  members: Array<{ name: string }>,
+  startDate: string,
+  endDate: string,
+  weekDates: string[]
+): Promise<{ members: MemberWeekPayload[]; cachedAt: string } | null> {
+  if (!isSupabaseConfigured()) return null;
+  if (members.length === 0) return { members: [], cachedAt: new Date().toISOString() };
+
+  const base = process.env.SUPABASE_URL!;
+  const quotedMembers = members
+    .map((member) => `"${member.name.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`)
+    .join(",");
+  const memberFilter = `in.(${quotedMembers})`;
+  const url =
+    `${base}/rest/v1/daily_member_stats` +
+    `?select=stat_date,member_name,total_seconds,entry_count,updated_at` +
+    `&member_name=${encodeURIComponent(memberFilter)}` +
+    `&stat_date=gte.${encodeURIComponent(startDate)}` +
+    `&stat_date=lte.${encodeURIComponent(endDate)}`;
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: supabaseHeaders(),
+    cache: "no-store",
+  });
+  if (!response.ok) return null;
+  const rows = (await response.json()) as StoredStatRow[];
+
+  const grouped = new Map<string, MemberWeekPayload>(
+    members.map((member) => [
+      member.name,
+      {
+        name: member.name,
+        totalSeconds: 0,
+        entryCount: 0,
+        days: weekDates.map((date) => ({ date, seconds: 0, entryCount: 0 })),
+      },
+    ])
+  );
+
+  let latestUpdatedAt: string | null = null;
+  for (const row of rows) {
+    latestUpdatedAt = latestUpdatedAt ? (row.updated_at > latestUpdatedAt ? row.updated_at : latestUpdatedAt) : row.updated_at;
+    const member = grouped.get(row.member_name);
+    if (!member) continue;
+    const day = member.days.find((item) => item.date === row.stat_date);
+    if (!day) continue;
+    day.seconds = row.total_seconds;
+    day.entryCount = row.entry_count;
+  }
+
+  const resultMembers = Array.from(grouped.values()).map((member) => ({
+    ...member,
+    totalSeconds: member.days.reduce((acc, day) => acc + day.seconds, 0),
+    entryCount: member.days.reduce((acc, day) => acc + day.entryCount, 0),
+  }));
+
+  return {
+    members: resultMembers,
+    cachedAt: latestUpdatedAt ?? new Date().toISOString(),
+  };
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const dateParam = searchParams.get("date");
@@ -88,42 +161,46 @@ export async function GET(request: NextRequest) {
 
   const weekDates = getLastSevenDates(endDate);
   const startDate = weekDates[0];
-  const cacheKey = `team-week::${startDate}::${endDate}`;
-  const cachedFresh = await getCacheSnapshot<CacheEntry>(cacheKey, false);
-  const cachedAny = await getCacheSnapshot<CacheEntry>(cacheKey, true);
   const members = getTeamMembers();
   if (members.length === 0) {
     return NextResponse.json({ error: "No members configured" }, { status: 400 });
   }
 
-  if (!forceRefresh && cachedFresh) {
-    return NextResponse.json({ ...cachedFresh, stale: false, warning: null });
-  }
-  if (!forceRefresh && cachedAny) {
-    return NextResponse.json({
-      ...cachedAny,
-      stale: true,
-      warning: "Showing last cached 7-day snapshot. Click Refresh view to fetch newer data.",
+  if (!forceRefresh) {
+    const stored = await readStoredWeek(members, startDate, endDate, weekDates);
+    if (!stored) {
+      return NextResponse.json({ error: "Supabase history is not configured" }, { status: 500 });
+    }
+    const hasData = stored.members.some((member) => member.totalSeconds > 0 || member.entryCount > 0);
+    if (!hasData) {
+      return NextResponse.json({
+        startDate,
+        endDate,
+        weekDates,
+        members: stored.members,
+        cachedAt: stored.cachedAt,
+        stale: true,
+        warning: "No stored weekly history yet. Click Refresh now to import and save from Toggl.",
+      });
+    }
+    const sortedStored = [...stored.members].sort((a, b) => {
+      if (b.totalSeconds !== a.totalSeconds) return b.totalSeconds - a.totalSeconds;
+      if (b.entryCount !== a.entryCount) return b.entryCount - a.entryCount;
+      return a.name.localeCompare(b.name);
     });
-  }
-  if (!forceRefresh && !cachedAny) {
     return NextResponse.json({
       startDate,
       endDate,
       weekDates,
-      members: members.map((member) => ({
-        name: member.name,
-        totalSeconds: 0,
-        entryCount: 0,
-        days: weekDates.map((date) => ({ date, seconds: 0, entryCount: 0 })),
-      })),
-      cachedAt: new Date().toISOString(),
-      stale: true,
-      warning: "No cached 7-day snapshot yet. Click Refresh view to load data.",
+      members: sortedStored,
+      cachedAt: stored.cachedAt,
+      stale: false,
+      warning: null,
     });
   }
 
   try {
+    const range = buildUtcRangeFromLocalDates(startDate, endDate, tzOffsetMinutes);
     const results = await Promise.all(
       members.map(async (member) => {
         const token = getTokenForMember(member.name);
@@ -132,12 +209,10 @@ export async function GET(request: NextRequest) {
           return { name: member.name, totalSeconds: 0, entryCount: 0, days: emptyDays };
         }
 
-        const range = buildUtcRangeFromLocalDates(startDate, endDate, tzOffsetMinutes);
         const entries = await fetchTimeEntries(token, range.startIso, range.endIso);
         const projectNames = await fetchProjectNames(token, entries);
-        const dayMap = new Map<string, DaySummary>(
-          weekDates.map((date) => [date, { date, seconds: 0, entryCount: 0 }])
-        );
+        const dayMap = new Map<string, DaySummary>(weekDates.map((date) => [date, { date, seconds: 0, entryCount: 0 }]));
+        const entriesByLocalDate = new Map<string, Array<Awaited<ReturnType<typeof fetchTimeEntries>>[number]>>();
 
         for (const entry of entries) {
           const projectName = getEntryProjectName(entry, projectNames);
@@ -148,7 +223,17 @@ export async function GET(request: NextRequest) {
           if (!bucket) continue;
           bucket.seconds += getEntrySeconds(entry);
           bucket.entryCount += 1;
+
+          const current = entriesByLocalDate.get(day) ?? [];
+          current.push({ ...entry, project_name: projectName ?? null } as Awaited<ReturnType<typeof fetchTimeEntries>>[number]);
+          entriesByLocalDate.set(day, current);
         }
+
+        await Promise.all(
+          Array.from(entriesByLocalDate.entries()).map(([localDate, list]) =>
+            persistHistoricalSnapshot("team", member.name, localDate, list)
+          )
+        );
 
         const days = weekDates.map((date) => dayMap.get(date) ?? { date, seconds: 0, entryCount: 0 });
         const totalSeconds = days.reduce((acc, day) => acc + day.seconds, 0);
@@ -163,38 +248,41 @@ export async function GET(request: NextRequest) {
       return a.name.localeCompare(b.name);
     });
 
-    const payload: CacheEntry = {
+    await persistWeeklyRollup(endDate, sorted);
+
+    return NextResponse.json({
       startDate,
       endDate,
       weekDates,
       members: sorted,
       cachedAt: new Date().toISOString(),
-    };
-    await setCacheSnapshot(cacheKey, payload, CACHE_TTL_MS);
-    await persistWeeklyRollup(endDate, sorted);
-    return NextResponse.json({ ...payload, stale: false, warning: null });
+      stale: false,
+      warning: null,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     const status = (error as Error & { status?: number }).status ?? 502;
     const quotaRemaining = (error as Error & { quotaRemaining?: string | null }).quotaRemaining ?? null;
     const quotaResetsIn = (error as Error & { quotaResetsIn?: string | null }).quotaResetsIn ?? null;
 
-    if ((status === 402 || status === 429) && cachedAny) {
+    const stored = await readStoredWeek(members, startDate, endDate, weekDates);
+    if (stored) {
+      await persistHistoricalError("team", null, endDate, message);
+      const sortedStored = [...stored.members].sort((a, b) => {
+        if (b.totalSeconds !== a.totalSeconds) return b.totalSeconds - a.totalSeconds;
+        if (b.entryCount !== a.entryCount) return b.entryCount - a.entryCount;
+        return a.name.localeCompare(b.name);
+      });
       return NextResponse.json({
-        ...cachedAny,
+        startDate,
+        endDate,
+        weekDates,
+        members: sortedStored,
+        cachedAt: stored.cachedAt,
         stale: true,
-        warning: "Quota/rate limit reached. Showing last cached 7-day snapshot.",
+        warning: "Toggl refresh failed. Showing stored weekly data from Supabase.",
         quotaRemaining,
         quotaResetsIn,
-      });
-    }
-
-    if (cachedAny) {
-      await persistHistoricalError("team", null, endDate, message);
-      return NextResponse.json({
-        ...cachedAny,
-        stale: true,
-        warning: "Toggl unavailable. Showing last cached 7-day snapshot.",
       });
     }
 
