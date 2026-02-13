@@ -382,10 +382,12 @@ export default function TimeDashboard({
   members,
   initialMode = "all",
   restrictToMember = null,
+  allowAllCalendars = true,
 }: {
   members: Member[];
   initialMode?: "member" | "all" | "team";
   restrictToMember?: string | null;
+  allowAllCalendars?: boolean;
 }) {
   const defaultMember = members[0]?.name ?? "";
   const [member, setMember] = useState(defaultMember);
@@ -411,6 +413,15 @@ export default function TimeDashboard({
 
   const hasMembers = members.length > 0;
   const isSelfOnly = Boolean(restrictToMember);
+  const sanitizeMode = useMemo(
+    () =>
+      (next: "member" | "team" | "all"): "member" | "team" | "all" => {
+        if (isSelfOnly) return "member";
+        if (!allowAllCalendars && next === "all") return "team";
+        return next;
+      },
+    [isSelfOnly, allowAllCalendars]
+  );
 
   useEffect(() => {
     if (!restrictToMember) return;
@@ -422,8 +433,8 @@ export default function TimeDashboard({
   }, [restrictToMember, members]);
 
   useEffect(() => {
-    setMode(isSelfOnly ? "member" : initialMode);
-  }, [initialMode, isSelfOnly]);
+    setMode(sanitizeMode(initialMode));
+  }, [initialMode, sanitizeMode]);
 
   useEffect(() => {
     const storedFilters = localStorage.getItem(FILTERS_KEY);
@@ -449,13 +460,13 @@ export default function TimeDashboard({
           setDate(parsed.date);
         }
         if (parsed.mode && !isSelfOnly) {
-          setMode(parsed.mode === "member" ? "all" : parsed.mode);
+          setMode(sanitizeMode(parsed.mode === "member" ? "all" : parsed.mode));
         }
       } catch {
         // ignore
       }
     }
-  }, [isSelfOnly, members]);
+  }, [isSelfOnly, members, sanitizeMode]);
 
   useEffect(() => {
     if (!member) return;
@@ -718,7 +729,7 @@ export default function TimeDashboard({
   const handleApplyFilter = (filter: SavedFilter) => {
     if (!isSelfOnly) setMember(filter.member);
     setDate(filter.date);
-    setMode(isSelfOnly ? "member" : "all");
+    setMode(sanitizeMode("all"));
   };
 
   if (!hasMembers) {
@@ -737,17 +748,19 @@ export default function TimeDashboard({
       <div className="flex flex-wrap items-center justify-between gap-3">
         {!isSelfOnly ? (
           <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              className={`rounded-full border px-4 py-2 text-sm font-semibold ${
-                mode === "all"
-                  ? "border-slate-900 bg-slate-900 text-white"
-                  : "border-slate-200 bg-white text-slate-600"
-              }`}
-              onClick={() => setMode("all")}
-            >
-              All calendars
-            </button>
+            {allowAllCalendars && (
+              <button
+                type="button"
+                className={`rounded-full border px-4 py-2 text-sm font-semibold ${
+                  mode === "all"
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-slate-200 bg-white text-slate-600"
+                }`}
+                onClick={() => setMode("all")}
+              >
+                All calendars
+              </button>
+            )}
             <button
               type="button"
               className={`rounded-full border px-4 py-2 text-sm font-semibold ${
