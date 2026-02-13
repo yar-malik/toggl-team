@@ -333,22 +333,53 @@ export async function listMemberProfiles(): Promise<Array<{ name: string; email:
 
 export async function getMemberNameByEmail(email: string): Promise<string | null> {
   const normalizedEmail = email.trim().toLowerCase();
-  if (!normalizedEmail || !isSupabaseConfigured()) return null;
+  if (!normalizedEmail) return null;
 
-  const url =
-    `${getBaseUrl()}/rest/v1/members` +
-    `?select=member_name` +
-    `&email=eq.${encodeURIComponent(normalizedEmail)}` +
-    `&limit=1`;
-  const response = await fetch(url, {
-    method: "GET",
-    headers: supabaseHeaders(),
-    cache: "no-store",
-  });
-  if (!response.ok) return null;
-  const rows = (await response.json()) as Array<{ member_name?: string }>;
-  const memberName = rows[0]?.member_name?.trim() ?? "";
-  return memberName.length > 0 ? canonicalizeMemberName(memberName) : null;
+  if (isSupabaseConfigured()) {
+    const operators = ["eq", "ilike"] as const;
+    for (const operator of operators) {
+      const url =
+        `${getBaseUrl()}/rest/v1/members` +
+        `?select=member_name` +
+        `&email=${operator}.${encodeURIComponent(normalizedEmail)}` +
+        `&limit=1`;
+      const response = await fetch(url, {
+        method: "GET",
+        headers: supabaseHeaders(),
+        cache: "no-store",
+      });
+      if (!response.ok) continue;
+      const rows = (await response.json()) as Array<{ member_name?: string }>;
+      const memberName = rows[0]?.member_name?.trim() ?? "";
+      if (memberName.length > 0) return canonicalizeMemberName(memberName);
+    }
+
+    const allResponse = await fetch(`${getBaseUrl()}/rest/v1/members?select=member_name,email`, {
+      method: "GET",
+      headers: supabaseHeaders(),
+      cache: "no-store",
+    });
+    if (allResponse.ok) {
+      const rows = (await allResponse.json()) as Array<{ member_name?: string; email?: string | null }>;
+      const exact = rows.find((row) => (row.email ?? "").trim().toLowerCase() === normalizedEmail);
+      if (exact?.member_name) return canonicalizeMemberName(exact.member_name);
+    }
+  }
+
+  const [localPartRaw] = normalizedEmail.split("@");
+  const localPart = localPartRaw ?? "";
+  const plusIdx = localPart.indexOf("+");
+  const candidateFromTag = plusIdx >= 0 ? localPart.slice(plusIdx + 1) : "";
+  const candidateFromLocal = plusIdx >= 0 ? localPart.slice(0, plusIdx) : localPart;
+  const candidates = [candidateFromTag, candidateFromLocal]
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0)
+    .map((value) => canonicalizeMemberName(value));
+
+  if (candidates.length === 0) return null;
+  const members = await listMembers();
+  const match = members.find((member) => candidates.some((candidate) => member.toLowerCase() === candidate.toLowerCase()));
+  return match ?? null;
 }
 
 function getLastSevenLocalDates(endDate: string) {
