@@ -215,7 +215,23 @@ export async function listProjects(): Promise<StoredProject[]> {
       }
     }
 
-  return Array.from(canonical.values()).sort((a, b) => a.project_name.localeCompare(b.project_name));
+  const byName = new Map<string, StoredProject>();
+  for (const project of canonical.values()) {
+    const normalizedName = (project.project_name ?? "").trim().toLowerCase();
+    const key = normalizedName || project.project_key;
+    const existing = byName.get(key);
+    if (!existing) {
+      byName.set(key, { ...project });
+      continue;
+    }
+    existing.total_seconds = (existing.total_seconds ?? 0) + (project.total_seconds ?? 0);
+    existing.entry_count = (existing.entry_count ?? 0) + (project.entry_count ?? 0);
+    if (!existing.project_color && project.project_color) {
+      existing.project_color = project.project_color;
+    }
+  }
+
+  return Array.from(byName.values()).sort((a, b) => a.project_name.localeCompare(b.project_name));
 }
 
 export async function createProject(projectName: string, projectColor?: string | null) {
@@ -227,7 +243,7 @@ export async function createProject(projectName: string, projectColor?: string |
   if (!projectKey || !savedName) {
     throw new Error("Failed to save project");
   }
-  let finalColor = DEFAULT_PROJECT_COLOR;
+  let finalColor: string = DEFAULT_PROJECT_COLOR;
   if (typeof projectColor === "string") {
     const normalizedColor = projectColor.trim().toUpperCase();
     if (!/^#[0-9A-F]{6}$/.test(normalizedColor)) {

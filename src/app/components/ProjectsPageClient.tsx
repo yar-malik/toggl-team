@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { DEFAULT_PROJECT_COLOR, PROJECT_PASTEL_HEX } from "@/lib/projectColors";
+import { DEFAULT_PROJECT_COLOR, PROJECT_PASTEL_HEX, getProjectBaseColor } from "@/lib/projectColors";
 
 type Project = {
   key: string;
@@ -23,7 +23,7 @@ function formatHours(totalSeconds: number) {
 }
 
 function normalizeColor(color: string | null | undefined) {
-  return (color || DEFAULT_PROJECT_COLOR).toUpperCase();
+  return getProjectBaseColor("", color).toUpperCase();
 }
 
 function ProjectModal({
@@ -184,6 +184,7 @@ export default function ProjectsPageClient({ initialProjects }: { initialProject
                 <td className="px-6 py-3">
                   <div className="inline-flex items-center gap-2 text-base font-medium text-slate-900">
                     <span className="inline-block h-3.5 w-3.5 rounded-full" style={{ backgroundColor: project.color }} />
+                    
                     {project.name}
                   </div>
                 </td>

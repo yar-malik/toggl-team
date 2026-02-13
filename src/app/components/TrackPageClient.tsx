@@ -261,8 +261,7 @@ function minuteToIso(dateInput: string, minuteOfDay: number) {
 }
 
 function getPastelProjectStyle(project: string, projectColor: string | null | undefined): CSSProperties {
-  void projectColor;
-  return getProjectSurfaceColors(project);
+  return getProjectSurfaceColors(project, projectColor);
 }
 
 export default function TrackPageClient({ memberName }: { memberName: string }) {
@@ -571,6 +570,12 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
     if (!query) return sorted;
     return sorted.filter((project) => project.name.toLowerCase().includes(query));
   }, [projectSearch, projects]);
+  const selectedProjectColor = useMemo(() => {
+    const normalized = projectName.trim().toLowerCase();
+    if (!normalized) return null;
+    const match = projects.find((project) => project.name.trim().toLowerCase() === normalized);
+    return match?.color ?? null;
+  }, [projectName, projects]);
   const filteredModalProjects = useMemo(() => {
     const query = modalProjectSearch.trim().toLowerCase();
     const sorted = [...projects].sort((a, b) => a.name.localeCompare(b.name));
@@ -702,7 +707,10 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
                 <svg viewBox="0 0 24 24" className="h-4 w-4 text-sky-700" fill="currentColor" aria-hidden="true">
                   <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3l1.5 1.5h8.5A2.5 2.5 0 0 1 21 9v9.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5z" />
                 </svg>
-                <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: getProjectBaseColor(projectName || "No project") }} />
+                <span
+                  className="inline-block h-2.5 w-2.5 rounded-full"
+                  style={{ backgroundColor: getProjectBaseColor(projectName || "No project", selectedProjectColor) }}
+                />
                 <span className="max-w-[120px] truncate">{projectName || "No project"}</span>
               </button>
 
@@ -755,7 +763,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
                         >
                           <span
                             className="h-2.5 w-2.5 rounded-full"
-                            style={{ backgroundColor: getProjectBaseColor(project.color || project.name) }}
+                            style={{ backgroundColor: getProjectBaseColor(project.name, project.color) }}
                           />
                           <span className="truncate text-sm font-semibold text-slate-800">{project.name}</span>
                         </button>
@@ -1216,7 +1224,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
                           >
                             <span
                               className="h-2.5 w-2.5 rounded-full"
-                              style={{ backgroundColor: getProjectBaseColor(project.color || project.name) }}
+                              style={{ backgroundColor: getProjectBaseColor(project.name, project.color) }}
                             />
                             <span className="truncate text-sm font-semibold text-slate-800">{project.name}</span>
                           </button>

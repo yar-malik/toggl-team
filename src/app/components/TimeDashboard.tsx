@@ -195,6 +195,7 @@ function buildTimelineBlocks(entries: TimeEntry[], dateInput: string) {
   const { start, end } = getDayBoundsMs(dateInput);
   const pxPerMs = HOUR_HEIGHT / (60 * 60 * 1000);
   const minDurationMs = MIN_BLOCK_HEIGHT / pxPerMs;
+  const dayHeightPx = HOURS_IN_DAY * HOUR_HEIGHT;
   const sorted = [...entries].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
   const blocks: TimelineBlock[] = [];
   let lastBottomPx = -Infinity;
@@ -209,8 +210,10 @@ function buildTimelineBlocks(entries: TimeEntry[], dateInput: string) {
     if (visibleEnd <= visibleStart) continue;
     const displayEnd = Math.min(end, Math.max(visibleEnd, visibleStart + minDurationMs));
     const idealTopPx = (visibleStart - start) * pxPerMs;
-    const heightPx = (displayEnd - visibleStart) * pxPerMs;
-    const topPx = Math.max(idealTopPx, lastBottomPx + 2);
+    const rawHeightPx = (displayEnd - visibleStart) * pxPerMs;
+    const unclampedTopPx = Math.max(idealTopPx, lastBottomPx + 2);
+    const topPx = Math.max(0, Math.min(dayHeightPx - MIN_BLOCK_HEIGHT, unclampedTopPx));
+    const heightPx = Math.max(MIN_BLOCK_HEIGHT, Math.min(rawHeightPx, dayHeightPx - topPx));
     lastBottomPx = topPx + heightPx;
 
     blocks.push({
@@ -309,8 +312,7 @@ function getMemberPageHref(memberName: string, date: string) {
 }
 
 function getProjectBlockStyle(project: string, projectColor: string | null | undefined): CSSProperties {
-  void projectColor;
-  return getProjectSurfaceColors(project);
+  return getProjectSurfaceColors(project, projectColor);
 }
 
 function buildSummary(entries: TimeEntry[]) {
@@ -594,7 +596,14 @@ export default function TimeDashboard({
 
   const teamTimeline = useMemo(() => {
     if (!teamData) return [] as Array<{ name: string; blocks: TimelineBlock[]; maxLanes: number }>;
-    return teamData.members.map((memberData) => ({
+    const orderedMembers = [...teamData.members].sort((a, b) => {
+      const aIsYar = a.name.trim().toLowerCase() === "yar";
+      const bIsYar = b.name.trim().toLowerCase() === "yar";
+      if (aIsYar && !bIsYar) return -1;
+      if (!aIsYar && bIsYar) return 1;
+      return a.name.localeCompare(b.name);
+    });
+    return orderedMembers.map((memberData) => ({
       name: memberData.name,
       ...buildTimelineBlocks(memberData.entries, date),
     }));

@@ -20,6 +20,7 @@ export const PROJECT_PASTEL_HEX = [
 ] as const;
 
 export const DEFAULT_PROJECT_COLOR = PROJECT_PASTEL_HEX[0];
+const PALETTE_SET = new Set(PROJECT_PASTEL_HEX.map((color) => color.toUpperCase()));
 
 function hashText(value: string): number {
   let hash = 0;
@@ -31,7 +32,10 @@ function hashText(value: string): number {
 
 export function getProjectBaseColor(projectName: string, explicitColor?: string | null): string {
   const rawExplicit = explicitColor?.trim() ?? "";
-  if (/^#[0-9a-fA-F]{6}$/.test(rawExplicit)) return rawExplicit.toUpperCase();
+  if (/^#[0-9a-fA-F]{6}$/.test(rawExplicit)) {
+    const normalizedExplicit = rawExplicit.toUpperCase();
+    if (PALETTE_SET.has(normalizedExplicit)) return normalizedExplicit;
+  }
   const normalized = projectName.trim().toLowerCase();
   if (!normalized || normalized === "no project") return "#CBD5E1";
   return PROJECT_PASTEL_HEX[hashText(normalized) % PROJECT_PASTEL_HEX.length];
