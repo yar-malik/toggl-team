@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 
 type Member = { name: string };
@@ -323,12 +324,8 @@ function formatWaitMinutes(secondsRaw: string | null): string | null {
   return `${minutes} min`;
 }
 
-function toAnchorId(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+function getMemberPageHref(memberName: string, date: string) {
+  return `/member/${encodeURIComponent(memberName)}?date=${encodeURIComponent(date)}`;
 }
 
 function getProjectColorClass(project: string): string {
@@ -640,20 +637,6 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
 
     return () => window.clearInterval(intervalId);
   }, []);
-
-  useEffect(() => {
-    const scrollToProfileFromHash = () => {
-      const hash = window.location.hash;
-      if (!hash.startsWith("#profile-")) return;
-      const target = document.getElementById(hash.slice(1));
-      if (!target) return;
-      target.scrollIntoView({ behavior: "smooth", block: "start" });
-    };
-
-    scrollToProfileFromHash();
-    window.addEventListener("hashchange", scrollToProfileFromHash);
-    return () => window.removeEventListener("hashchange", scrollToProfileFromHash);
-  }, [memberProfiles, mode]);
 
   const runningEntry = useMemo(() => {
     if (!data?.current) return null;
@@ -1144,7 +1127,12 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                               style={{ height: `${barHeight}px` }}
                               title={`${row.name}: ${formatDuration(row.rankedSeconds)}`}
                             />
-                            <p className="truncate text-center text-xs font-semibold text-slate-900">{row.name}</p>
+                            <Link
+                              href={getMemberPageHref(row.name, date)}
+                              className="truncate text-center text-xs font-semibold text-slate-900 hover:text-sky-700 hover:underline"
+                            >
+                              {row.name}
+                            </Link>
                             <p className="text-center text-[11px] text-slate-600">{formatDuration(row.rankedSeconds)}</p>
                           </div>
                         );
@@ -1153,7 +1141,13 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                     <div className="mt-3 grid gap-2 md:grid-cols-2">
                       {teamRanking.map((row) => (
                         <p key={`${row.name}-meta`} className="text-xs text-slate-600">
-                          <span className="font-semibold text-slate-800">{row.name}</span>: Start {formatTime(row.firstStart)} | End {formatTime(row.lastEnd)} | Longest break {formatDuration(row.longestBreakSeconds)} | {row.entryCount} entries
+                          <Link
+                            href={getMemberPageHref(row.name, date)}
+                            className="font-semibold text-slate-800 hover:text-sky-700 hover:underline"
+                          >
+                            {row.name}
+                          </Link>
+                          : Start {formatTime(row.firstStart)} | End {formatTime(row.lastEnd)} | Longest break {formatDuration(row.longestBreakSeconds)} | {row.entryCount} entries
                         </p>
                       ))}
                     </div>
@@ -1186,9 +1180,9 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                       <div className="flex items-start justify-between">
                         <div>
                           <h3 className="text-base font-semibold text-slate-900">
-                            <a href={`#profile-${toAnchorId(memberData.name)}`} className="hover:text-sky-700 hover:underline">
+                            <Link href={getMemberPageHref(memberData.name, date)} className="hover:text-sky-700 hover:underline">
                               {memberData.name}
-                            </a>
+                            </Link>
                           </h3>
                           <p className="text-sm text-slate-500">Total {formatDuration(cardTotalSeconds)}</p>
                         </div>
@@ -1293,13 +1287,13 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                   )}
                   <div className="flex flex-wrap gap-2">
                     {memberProfiles.members.map((profile) => (
-                      <a
+                      <Link
                         key={`${profile.name}-jump`}
-                        href={`#profile-${toAnchorId(profile.name)}`}
+                        href={getMemberPageHref(profile.name, date)}
                         className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-800 hover:bg-sky-100"
                       >
                         {profile.name}
-                      </a>
+                      </Link>
                     ))}
                   </div>
                 </div>
@@ -1315,21 +1309,21 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                     const maxDaySeconds = profile.days.reduce((max, day) => Math.max(max, day.seconds), 0);
                     const safeMax = maxDaySeconds > 0 ? maxDaySeconds : 1;
                     return (
-                      <section
-                        id={`profile-${toAnchorId(profile.name)}`}
-                        key={`profile-${profile.name}`}
-                        className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 scroll-mt-24"
-                      >
+                      <section key={`profile-${profile.name}`} className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
-                            <h3 className="text-base font-semibold text-slate-900">{profile.name}</h3>
+                            <h3 className="text-base font-semibold text-slate-900">
+                              <Link href={getMemberPageHref(profile.name, date)} className="hover:text-sky-700 hover:underline">
+                                {profile.name}
+                              </Link>
+                            </h3>
                             <p className="text-sm text-slate-500">
                               7-day total {formatDuration(profile.totalSeconds)} | {profile.entryCount} entries
                             </p>
                           </div>
-                          <a href="#" className="text-xs font-medium text-sky-700 hover:underline">
-                            Back to top
-                          </a>
+                          <Link href={getMemberPageHref(profile.name, date)} className="text-xs font-medium text-sky-700 hover:underline">
+                            Open profile page
+                          </Link>
                         </div>
 
                         <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -1451,7 +1445,11 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                     {teamWeekData.members.map((row, index) => (
                       <tr key={row.name} className="border-b border-slate-100">
                         <td className="px-2 py-2 font-semibold text-slate-900">{index + 1}</td>
-                        <td className="px-2 py-2 text-slate-800">{row.name}</td>
+                        <td className="px-2 py-2 text-slate-800">
+                          <Link href={getMemberPageHref(row.name, date)} className="hover:text-sky-700 hover:underline">
+                            {row.name}
+                          </Link>
+                        </td>
                         <td className="px-2 py-2 text-slate-800">{formatDuration(row.totalSeconds)}</td>
                         <td className="px-2 py-2 text-slate-800">{row.entryCount}</td>
                         {teamWeekData.weekDates.map((d) => {
@@ -1507,7 +1505,11 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                 >
                   {teamTimeline.map((memberTimeline) => (
                     <div key={memberTimeline.name} className="space-y-2">
-                      <p className="text-sm font-semibold text-slate-700">{memberTimeline.name}</p>
+                      <p className="text-sm font-semibold text-slate-700">
+                        <Link href={getMemberPageHref(memberTimeline.name, date)} className="hover:text-sky-700 hover:underline">
+                          {memberTimeline.name}
+                        </Link>
+                      </p>
                       <div
                         className="relative rounded-xl border border-slate-200 bg-slate-50"
                         style={{ height: `${HOURS_IN_DAY * HOUR_HEIGHT}px` }}

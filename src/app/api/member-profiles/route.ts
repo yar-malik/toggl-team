@@ -186,6 +186,7 @@ async function buildAiAnalysis(member: MemberProfile): Promise<string | null> {
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const dateParam = searchParams.get("date");
+  const memberParam = searchParams.get("member")?.trim() ?? "";
   const forceRefresh = searchParams.get("refresh") === "1";
   const tzOffsetMinutes = parseTzOffsetMinutes(searchParams.get("tzOffset"));
 
@@ -196,7 +197,8 @@ export async function GET(request: NextRequest) {
 
   const weekDates = getLastSevenDates(endDate);
   const startDate = weekDates[0];
-  const cacheKey = `member-profiles::${startDate}::${endDate}`;
+  const memberCachePart = memberParam ? memberParam.toLowerCase() : "all";
+  const cacheKey = `member-profiles::${startDate}::${endDate}::${memberCachePart}`;
   const cachedFresh = await getCacheSnapshot<CacheEntry>(cacheKey, false);
   const cachedAny = await getCacheSnapshot<CacheEntry>(cacheKey, true);
 
@@ -211,9 +213,15 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const members = getTeamMembers();
-  if (members.length === 0) {
+  const teamMembers = getTeamMembers();
+  if (teamMembers.length === 0) {
     return NextResponse.json({ error: "No members configured" }, { status: 400 });
+  }
+  const members = memberParam
+    ? teamMembers.filter((member) => member.name.toLowerCase() === memberParam.toLowerCase())
+    : teamMembers;
+  if (memberParam && members.length === 0) {
+    return NextResponse.json({ error: "Unknown member" }, { status: 404 });
   }
 
   const range = buildUtcRangeFromLocalDates(startDate, endDate, tzOffsetMinutes);
