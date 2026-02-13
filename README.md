@@ -70,6 +70,12 @@ You can override member KPIs from a Google Sheet CSV (for example, only for spec
 KPI_SHEET_CSV_URL=https://docs.google.com/spreadsheets/d/<sheet-id>/export?format=csv&gid=<gid>
 ```
 
+Or provide the normal sheet link and the app will auto-convert it:
+
+```bash
+KPI_SHEET_URL=https://docs.google.com/spreadsheets/d/<sheet-id>/edit?usp=sharing
+```
+
 CSV requirements:
 - Include a member column named `member`, `name`, or `teammate`.
 - Each other column is treated as a KPI (`column name` = KPI label, cell value = KPI value).

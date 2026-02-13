@@ -157,7 +157,7 @@ function parseCsvLine(line: string): string[] {
 }
 
 async function fetchKpiOverridesFromCsv(): Promise<Map<string, KpiItem[]>> {
-  const url = process.env.KPI_SHEET_CSV_URL?.trim();
+  const url = resolveKpiCsvUrl();
   if (!url) return new Map();
 
   try {
@@ -198,6 +198,29 @@ async function fetchKpiOverridesFromCsv(): Promise<Map<string, KpiItem[]>> {
     return map;
   } catch {
     return new Map();
+  }
+}
+
+function resolveKpiCsvUrl(): string | null {
+  const csvUrl = process.env.KPI_SHEET_CSV_URL?.trim();
+  if (csvUrl) return csvUrl;
+
+  const sheetUrl = process.env.KPI_SHEET_URL?.trim();
+  if (!sheetUrl) return null;
+
+  try {
+    const parsed = new URL(sheetUrl);
+    if (!parsed.hostname.includes("docs.google.com")) return null;
+    const match = parsed.pathname.match(/\/spreadsheets\/d\/([^/]+)/);
+    if (!match?.[1]) return null;
+    const sheetId = match[1];
+
+    // Prefer explicit gid if provided, otherwise default sheet gid 0.
+    const gidFromQuery = parsed.searchParams.get("gid");
+    const gid = gidFromQuery && /^-?\d+$/.test(gidFromQuery) ? gidFromQuery : "0";
+    return `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
+  } catch {
+    return null;
   }
 }
 
