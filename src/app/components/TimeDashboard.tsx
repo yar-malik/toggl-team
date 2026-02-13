@@ -309,8 +309,8 @@ function getMemberPageHref(memberName: string, date: string) {
 }
 
 function getProjectBlockStyle(project: string, projectColor: string | null | undefined): CSSProperties {
-  const colorSource = (projectColor ?? "").trim() || project;
-  return getProjectSurfaceColors(colorSource);
+  void projectColor;
+  return getProjectSurfaceColors(project);
 }
 
 function buildSummary(entries: TimeEntry[]) {

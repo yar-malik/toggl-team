@@ -261,8 +261,8 @@ function minuteToIso(dateInput: string, minuteOfDay: number) {
 }
 
 function getPastelProjectStyle(project: string, projectColor: string | null | undefined): CSSProperties {
-  const colorSource = (projectColor ?? "").trim() || project;
-  return getProjectSurfaceColors(colorSource);
+  void projectColor;
+  return getProjectSurfaceColors(project);
 }
 
 export default function TrackPageClient({ memberName }: { memberName: string }) {

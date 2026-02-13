@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { signInWithPassword } from "@/lib/supabaseAuth";
+import { getMemberNameByEmail } from "@/lib/manualTimeEntriesStore";
 
 type LoginBody = {
   email?: string;
@@ -22,11 +23,13 @@ export async function POST(request: NextRequest) {
 
   try {
     const session = await signInWithPassword(email, password);
+    const resolvedEmail = session.user.email ?? email;
+    const memberName = await getMemberNameByEmail(resolvedEmail);
     const response = NextResponse.json({
       ok: true,
       user: {
         id: session.user.id,
-        email: session.user.email ?? email,
+        email: resolvedEmail,
       },
     });
     response.cookies.set("voho_access_token", session.access_token, {
@@ -36,7 +39,14 @@ export async function POST(request: NextRequest) {
       path: "/",
       maxAge: 60 * 60 * 24 * 7,
     });
-    response.cookies.set("voho_user_email", session.user.email ?? email, {
+    response.cookies.set("voho_user_email", resolvedEmail, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 7,
+    });
+    response.cookies.set("voho_member_name", memberName ?? "", {
       httpOnly: true,
       secure: true,
       sameSite: "lax",
@@ -49,4 +59,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 401 });
   }
 }
-

@@ -6,7 +6,8 @@ import { getMemberNameByEmail } from "@/lib/manualTimeEntriesStore";
 export default async function PlatformLayout({ children }: { children: ReactNode }) {
   const cookieStore = await cookies();
   const currentUserEmail = cookieStore.get("voho_user_email")?.value ?? null;
-  const currentMemberName = currentUserEmail ? await getMemberNameByEmail(currentUserEmail) : null;
+  const memberCookie = cookieStore.get("voho_member_name")?.value?.trim() ?? "";
+  const currentMemberName = memberCookie || (currentUserEmail ? await getMemberNameByEmail(currentUserEmail) : null);
 
   return (
     <PlatformShell currentUserEmail={currentUserEmail} currentMemberName={currentMemberName}>
