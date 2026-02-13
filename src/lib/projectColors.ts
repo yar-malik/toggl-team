@@ -1,11 +1,25 @@
-const PASTEL_PROJECT_PALETTE = [
-  "#DD9999",
-  "#9BC5AA",
-  "#BCA4CC",
-  "#E4C2A8",
-  "#94BDC8",
-  "#E7D98C",
+export const PROJECT_PASTEL_HEX = [
+  "#A9E8E8",
+  "#83CCD2",
+  "#F5E29E",
+  "#E2CF88",
+  "#D2CCF2",
+  "#BEB9E2",
+  "#E8B7CA",
+  "#D8B0C8",
+  "#F68BA2",
+  "#DFCFF3",
+  "#ADE1EF",
+  "#C6EAEE",
+  "#B2EAD3",
+  "#B1E8ED",
+  "#EDBDD5",
+  "#C8EBEF",
+  "#C0F3EA",
+  "#F5F4D6",
 ] as const;
+
+export const DEFAULT_PROJECT_COLOR = PROJECT_PASTEL_HEX[0];
 
 function hashText(value: string): number {
   let hash = 0;
@@ -15,10 +29,12 @@ function hashText(value: string): number {
   return hash;
 }
 
-export function getProjectBaseColor(projectName: string): string {
+export function getProjectBaseColor(projectName: string, explicitColor?: string | null): string {
+  const rawExplicit = explicitColor?.trim() ?? "";
+  if (/^#[0-9a-fA-F]{6}$/.test(rawExplicit)) return rawExplicit.toUpperCase();
   const normalized = projectName.trim().toLowerCase();
   if (!normalized || normalized === "no project") return "#CBD5E1";
-  return PASTEL_PROJECT_PALETTE[hashText(normalized) % PASTEL_PROJECT_PALETTE.length];
+  return PROJECT_PASTEL_HEX[hashText(normalized) % PROJECT_PASTEL_HEX.length];
 }
 
 export function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
@@ -30,8 +46,8 @@ export function hexToRgb(hex: string): { r: number; g: number; b: number } | nul
   return { r, g, b };
 }
 
-export function getProjectSurfaceColors(projectName: string): { borderColor: string; backgroundColor: string } {
-  const rgb = hexToRgb(getProjectBaseColor(projectName));
+export function getProjectSurfaceColors(projectName: string, explicitColor?: string | null): { borderColor: string; backgroundColor: string } {
+  const rgb = hexToRgb(getProjectBaseColor(projectName, explicitColor));
   if (!rgb) {
     return {
       borderColor: "rgb(148 163 184 / 0.80)",
@@ -39,7 +55,7 @@ export function getProjectSurfaceColors(projectName: string): { borderColor: str
     };
   }
   return {
-    borderColor: `rgb(${rgb.r} ${rgb.g} ${rgb.b} / 0.80)`,
-    backgroundColor: `rgb(${rgb.r} ${rgb.g} ${rgb.b} / 0.28)`,
+    borderColor: `rgb(${rgb.r} ${rgb.g} ${rgb.b} / 0.88)`,
+    backgroundColor: `rgb(${rgb.r} ${rgb.g} ${rgb.b} / 0.52)`,
   };
 }

@@ -1,5 +1,6 @@
 import "server-only";
 import { canonicalizeMemberName, namesMatch } from "@/lib/memberNames";
+import { DEFAULT_PROJECT_COLOR } from "@/lib/projectColors";
 
 type StoredEntryRow = {
   toggl_entry_id: number;
@@ -125,7 +126,7 @@ async function ensureManualProject(projectName: string | null): Promise<EnsurePr
       workspace_id: workspaceId,
       project_id: projectId,
       project_name: normalized,
-      project_color: "#0EA5E9",
+      project_color: DEFAULT_PROJECT_COLOR,
       created_at: nowIso,
       updated_at: nowIso,
     },
@@ -207,7 +208,7 @@ export async function listProjects(): Promise<StoredProject[]> {
         const rollup = rollupMap.get(canonicalKey);
         canonical.set(canonicalKey, {
           ...canonicalRow,
-          project_color: canonicalRow.project_color || "#0EA5E9",
+          project_color: canonicalRow.project_color || DEFAULT_PROJECT_COLOR,
           total_seconds: rollup?.totalSeconds ?? 0,
           entry_count: rollup?.entryCount ?? 0,
         });
@@ -226,7 +227,7 @@ export async function createProject(projectName: string, projectColor?: string |
   if (!projectKey || !savedName) {
     throw new Error("Failed to save project");
   }
-  let finalColor = "#0EA5E9";
+  let finalColor = DEFAULT_PROJECT_COLOR;
   if (typeof projectColor === "string") {
     const normalizedColor = projectColor.trim().toUpperCase();
     if (!/^#[0-9A-F]{6}$/.test(normalizedColor)) {
@@ -287,7 +288,7 @@ export async function updateProject(input: { key: string; name?: string | null; 
   return {
     projectKey: row.project_key,
     projectName: row.project_name,
-    projectColor: row.project_color ?? "#0EA5E9",
+    projectColor: row.project_color ?? DEFAULT_PROJECT_COLOR,
   };
 }
 

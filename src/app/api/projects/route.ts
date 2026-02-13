@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createProject, listProjects, updateProject } from "@/lib/manualTimeEntriesStore";
 import { requireAdminOrThrow } from "@/lib/authorization";
+import { DEFAULT_PROJECT_COLOR } from "@/lib/projectColors";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -23,7 +24,7 @@ export async function GET() {
       projects: projects.map((project) => ({
         key: project.project_key,
         name: project.project_name,
-        color: project.project_color || "#0EA5E9",
+        color: project.project_color || DEFAULT_PROJECT_COLOR,
         totalSeconds: project.total_seconds ?? 0,
         entryCount: project.entry_count ?? 0,
       })),
