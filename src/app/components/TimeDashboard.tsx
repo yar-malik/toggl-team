@@ -75,6 +75,8 @@ const MIN_BLOCK_HEIGHT = 24;
 const RANKING_ENTRY_CAP_SECONDS = 4 * 60 * 60;
 const EXCLUDED_PROJECT_NAME = "non-work-task";
 const AUTO_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
+const MEMBER_LINK_CLASS =
+  "font-semibold text-sky-700 underline decoration-sky-400 decoration-2 underline-offset-2 hover:text-sky-800";
 
 function formatDuration(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
@@ -770,6 +772,11 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
           </p>
         </div>
       </div>
+      {mode !== "member" && (
+        <p className="text-xs font-medium text-sky-800">
+          Tip: Team member names are clickable and open their dedicated profile pages.
+        </p>
+      )}
 
       <div className="grid gap-4 rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-sky-50/40 p-6 shadow-sm md:grid-cols-4">
         {mode === "member" && (
@@ -1067,7 +1074,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                             />
                             <Link
                               href={getMemberPageHref(row.name, date)}
-                              className="truncate text-center text-xs font-semibold text-slate-900 hover:text-sky-700 hover:underline"
+                              className={`truncate text-center text-xs ${MEMBER_LINK_CLASS}`}
                             >
                               {row.name}
                             </Link>
@@ -1081,7 +1088,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                         <p key={`${row.name}-meta`} className="text-xs text-slate-600">
                           <Link
                             href={getMemberPageHref(row.name, date)}
-                            className="font-semibold text-slate-800 hover:text-sky-700 hover:underline"
+                            className={MEMBER_LINK_CLASS}
                           >
                             {row.name}
                           </Link>
@@ -1118,7 +1125,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                       <div className="flex items-start justify-between">
                         <div>
                           <h3 className="text-base font-semibold text-slate-900">
-                            <Link href={getMemberPageHref(memberData.name, date)} className="hover:text-sky-700 hover:underline">
+                            <Link href={getMemberPageHref(memberData.name, date)} className={MEMBER_LINK_CLASS}>
                               {memberData.name}
                             </Link>
                           </h3>
@@ -1225,7 +1232,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                       <tr key={row.name} className="border-b border-slate-100">
                         <td className="px-2 py-2 font-semibold text-slate-900">{index + 1}</td>
                         <td className="px-2 py-2 text-slate-800">
-                          <Link href={getMemberPageHref(row.name, date)} className="hover:text-sky-700 hover:underline">
+                          <Link href={getMemberPageHref(row.name, date)} className={MEMBER_LINK_CLASS}>
                             {row.name}
                           </Link>
                         </td>
@@ -1285,7 +1292,7 @@ export default function TimeDashboard({ members }: { members: Member[] }) {
                   {teamTimeline.map((memberTimeline) => (
                     <div key={memberTimeline.name} className="space-y-2">
                       <p className="text-sm font-semibold text-slate-700">
-                        <Link href={getMemberPageHref(memberTimeline.name, date)} className="hover:text-sky-700 hover:underline">
+                        <Link href={getMemberPageHref(memberTimeline.name, date)} className={MEMBER_LINK_CLASS}>
                           {memberTimeline.name}
                         </Link>
                       </p>
