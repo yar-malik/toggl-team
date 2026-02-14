@@ -32,6 +32,14 @@ function formatTimer(totalSeconds: number): string {
   return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+function formatTimerFixedHours(totalSeconds: number): string {
+  const safe = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(safe / 3600);
+  const m = Math.floor((safe % 3600) / 60);
+  const s = safe % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
 function parseDurationMinutes(input: string): number | null {
   const raw = input.trim().toLowerCase();
   if (!raw) return null;
@@ -303,6 +311,7 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
     }
 
     setTimerInputError(null);
+    setTimerInput(formatTimerFixedHours(durationMinutes * 60));
     setBusy(true);
     try {
       if (current) {
@@ -454,8 +463,15 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
               }
             }}
             onBlur={() => {
-              if (!timerInput.trim()) {
+              const normalizedInput = timerInput.trim();
+              if (!normalizedInput) {
                 setTimerInput("0:00:00");
+                setTimerInputDirty(false);
+                return;
+              }
+              const parsedMinutes = parseDurationMinutes(normalizedInput);
+              if (parsedMinutes) {
+                setTimerInput(formatTimerFixedHours(parsedMinutes * 60));
               }
             }}
             placeholder="0:00:00"
