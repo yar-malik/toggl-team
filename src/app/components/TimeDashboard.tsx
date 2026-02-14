@@ -386,12 +386,14 @@ export default function TimeDashboard({
   restrictToMember = null,
   allowAllCalendars = true,
   allowTeamOverview = true,
+  selfMode = "member",
 }: {
   members: Member[];
   initialMode?: "member" | "all" | "team";
   restrictToMember?: string | null;
   allowAllCalendars?: boolean;
   allowTeamOverview?: boolean;
+  selfMode?: "member" | "all";
 }) {
   const defaultMember = members[0]?.name ?? "";
   const [member, setMember] = useState(defaultMember);
@@ -422,12 +424,12 @@ export default function TimeDashboard({
   const sanitizeMode = useMemo(
     () =>
       (next: "member" | "team" | "all"): "member" | "team" | "all" => {
-        if (isSelfOnly) return "member";
+        if (isSelfOnly) return selfMode === "all" ? "all" : "member";
         if (!allowAllCalendars && next === "all") return "team";
         if (!allowTeamOverview && next === "team") return "all";
         return next;
       },
-    [isSelfOnly, allowAllCalendars, allowTeamOverview]
+    [isSelfOnly, allowAllCalendars, allowTeamOverview, selfMode]
   );
 
   useEffect(() => {
@@ -435,9 +437,9 @@ export default function TimeDashboard({
     const exists = members.some((item) => item.name === restrictToMember);
     if (exists) {
       setMember(restrictToMember);
-      setMode("member");
+      setMode(selfMode === "all" ? "all" : "member");
     }
-  }, [restrictToMember, members]);
+  }, [restrictToMember, members, selfMode]);
 
   useEffect(() => {
     setMode(sanitizeMode(initialMode));

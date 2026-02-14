@@ -1,9 +1,10 @@
-import TrackPageClient from "@/app/components/TrackPageClient";
+import TimeDashboard from "@/app/components/TimeDashboard";
 import { getCurrentUserContext } from "@/lib/authorization";
 import { getMemberNameByEmail, listMemberProfiles } from "@/lib/manualTimeEntriesStore";
 import { cookies } from "next/headers";
 
 export default async function TrackPage() {
+  const members = await listMemberProfiles();
   const context = await getCurrentUserContext();
   const cookieStore = await cookies();
   const cookieEmail = cookieStore.get("voho_user_email")?.value ?? null;
@@ -13,7 +14,6 @@ export default async function TrackPage() {
   let memberName = memberNameByEmail;
 
   if (!memberName && resolvedEmail) {
-    const members = await listMemberProfiles();
     const byEmail = new Map(
       members
         .filter((member) => member.email)
@@ -34,5 +34,13 @@ export default async function TrackPage() {
     );
   }
 
-  return <TrackPageClient memberName={memberName} />;
+  return (
+    <TimeDashboard
+      members={members.map((m) => ({ name: m.name }))}
+      initialMode="all"
+      restrictToMember={memberName}
+      selfMode="all"
+      allowTeamOverview={false}
+    />
+  );
 }
