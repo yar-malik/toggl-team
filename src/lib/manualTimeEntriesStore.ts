@@ -1024,3 +1024,53 @@ export async function updateStoredTimeEntry(input: {
     source: updated.entry_source || "manual",
   };
 }
+
+export async function deleteStoredTimeEntry(input: {
+  memberName: string;
+  entryId: number;
+}) {
+  if (!isSupabaseConfigured()) {
+    throw new Error("Supabase history is not configured");
+  }
+
+  const existingResponse = await fetch(
+    `${getBaseUrl()}/rest/v1/time_entries?select=toggl_entry_id,member_name,is_running&toggl_entry_id=eq.${input.entryId}&limit=1`,
+    {
+      method: "GET",
+      headers: supabaseHeaders(),
+      cache: "no-store",
+    }
+  );
+  if (!existingResponse.ok) {
+    throw new Error("Failed to read existing entry");
+  }
+  const existingRows = (await existingResponse.json()) as Array<{
+    toggl_entry_id: number;
+    member_name: string;
+    is_running: boolean;
+  }>;
+  const existing = existingRows[0];
+  if (!existing) {
+    throw new Error("Entry not found");
+  }
+  if (!namesMatch(existing.member_name, input.memberName)) {
+    throw new Error("Entry does not belong to member");
+  }
+
+  const deleteResponse = await fetch(`${getBaseUrl()}/rest/v1/time_entries?toggl_entry_id=eq.${input.entryId}`, {
+    method: "DELETE",
+    headers: {
+      ...supabaseHeaders(),
+      Prefer: "return=minimal",
+    },
+    cache: "no-store",
+  });
+  if (!deleteResponse.ok) {
+    throw new Error("Failed to delete entry");
+  }
+
+  return {
+    deleted: true,
+    wasRunning: Boolean(existing.is_running),
+  };
+}
