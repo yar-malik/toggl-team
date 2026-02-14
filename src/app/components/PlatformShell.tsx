@@ -117,22 +117,23 @@ function formatTimer(totalSeconds: number) {
   return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-function setFaviconHref(href: string) {
-  let link = document.querySelector("link[rel='icon']") as HTMLLinkElement | null;
-  if (!link) {
-    link = document.createElement("link");
-    link.rel = "icon";
-    document.head.appendChild(link);
-  }
-  link.href = href;
+function setFaviconHref(href: string, stateKey: "idle" | "running") {
+  const withVersion = `${href}?state=${stateKey}&v=20260214`;
+  const relTargets = ["icon", "shortcut icon", "apple-touch-icon"];
 
-  let shortcut = document.querySelector("link[rel='shortcut icon']") as HTMLLinkElement | null;
-  if (!shortcut) {
-    shortcut = document.createElement("link");
-    shortcut.rel = "shortcut icon";
-    document.head.appendChild(shortcut);
+  for (const rel of relTargets) {
+    const links = Array.from(document.querySelectorAll(`link[rel='${rel}']`)) as HTMLLinkElement[];
+    if (links.length === 0) {
+      const created = document.createElement("link");
+      created.rel = rel;
+      created.href = withVersion;
+      document.head.appendChild(created);
+      continue;
+    }
+    for (const link of links) {
+      link.href = withVersion;
+    }
   }
-  shortcut.href = href;
 }
 
 export default function PlatformShell({
@@ -235,11 +236,11 @@ export default function PlatformShell({
   useEffect(() => {
     if (!isRunning) {
       document.title = defaultTitleRef.current;
-      setFaviconHref("/favicon-idle.svg");
+      setFaviconHref("/favicon-idle-v2.svg", "idle");
       return;
     }
-    document.title = currentTaskLabel ? `${currentTaskLabel} • ${runningLabel}` : runningLabel;
-    setFaviconHref("/favicon-running.svg");
+    document.title = currentTaskLabel ? `${runningLabel} • ${currentTaskLabel}` : runningLabel;
+    setFaviconHref("/favicon-running-v2.svg", "running");
   }, [isRunning, runningLabel, currentTaskLabel]);
 
   return (
