@@ -396,38 +396,30 @@ export default function PlatformShell({
                     <span>Pomodoro</span>
                   </span>
                 </Link>
-                <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-sky-700">Pomodoro</p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPomodoroState((prev) => {
-                          const next: PomodoroState = {
-                            ...prev,
-                            secondsLeft: prev.secondsLeft <= 0 ? DEFAULT_POMODORO_SECONDS : prev.secondsLeft,
-                            running: !prev.running,
-                          };
-                          writePomodoroState(next, "platform-shell");
-                          return next;
-                        });
-                      }}
-                      aria-label={pomodoroState.running ? "Pause pomodoro timer" : "Start pomodoro timer"}
-                      className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[#0BA5E9] text-white hover:bg-[#0994cf]"
-                    >
-                      {pomodoroState.running ? (
-                        <span className="flex items-center gap-[2px]">
-                          <span className="h-2.5 w-0.5 rounded bg-white" />
-                          <span className="h-2.5 w-0.5 rounded bg-white" />
-                        </span>
-                      ) : (
-                        <span className="ml-[1px] h-0 w-0 border-y-[5px] border-y-transparent border-l-[7px] border-l-white" />
-                      )}
-                    </button>
-                  </div>
-                  <p className="mt-1 text-sm font-semibold tabular-nums text-slate-800">
-                    {formatPomodoroTimer(pomodoroState.secondsLeft)}
-                  </p>
+                <div className="flex items-center justify-between rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-slate-700">
+                  <span className="font-medium tabular-nums">Pomodoro {formatPomodoroTimer(pomodoroState.secondsLeft)}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPomodoroState((prev) => {
+                        const next: PomodoroState = {
+                          ...prev,
+                          secondsLeft: prev.secondsLeft <= 0 ? DEFAULT_POMODORO_SECONDS : prev.secondsLeft,
+                          running: !prev.running,
+                        };
+                        writePomodoroState(next, "platform-shell");
+                        return next;
+                      });
+                    }}
+                    aria-label={pomodoroState.running ? "Stop pomodoro timer" : "Start pomodoro timer"}
+                    className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[#0BA5E9] text-white hover:bg-[#0994cf]"
+                  >
+                    {pomodoroState.running ? (
+                      <span className="h-2.5 w-2.5 rounded-sm bg-white" />
+                    ) : (
+                      <span className="ml-[1px] h-0 w-0 border-y-[5px] border-y-transparent border-l-[7px] border-l-white" />
+                    )}
+                  </button>
                 </div>
               </div>
             </div>
