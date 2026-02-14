@@ -484,10 +484,12 @@ export default function TimeDashboard({
   const [lastStoppedAtByMember, setLastStoppedAtByMember] = useState<Record<string, number>>({});
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [memberPickerOpen, setMemberPickerOpen] = useState(false);
+  const [blockDrag, setBlockDrag] = useState<BlockDragState | null>(null);
   const dayCalendarScrollRef = useRef<HTMLDivElement | null>(null);
   const allCalendarsScrollRef = useRef<HTMLDivElement | null>(null);
   const memberPickerRef = useRef<HTMLDivElement | null>(null);
   const allCalendarsDatePickerRef = useRef<HTMLInputElement | null>(null);
+  const suppressBlockClickUntilRef = useRef(0);
 
   const hasMembers = members.length > 0;
   const isSelfOnly = Boolean(restrictToMember);
@@ -687,6 +689,124 @@ export default function TimeDashboard({
     input.focus();
     input.click();
   };
+
+  const startBlockDrag = (
+    event: ReactMouseEvent<HTMLElement>,
+    mode: DragMode,
+    sourceEntry: TimeEntry,
+    memberName: string
+  ) => {
+    if (event.button !== 0) return;
+    if (sourceEntry.stop === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const dayBounds = getDayBoundsMs(date);
+    const startMs = new Date(sourceEntry.start).getTime();
+    const endMs = getEntryEndMs(sourceEntry);
+    if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs <= startMs) return;
+
+    const entryStartMinute = Math.max(0, (startMs - dayBounds.start) / (60 * 1000));
+    const entryEndMinute = Math.min(24 * 60, (endMs - dayBounds.start) / (60 * 1000));
+    const initialTopPx = (entryStartMinute / 60) * HOUR_HEIGHT;
+    const initialHeightPx = Math.max(MIN_BLOCK_HEIGHT, ((entryEndMinute - entryStartMinute) / 60) * HOUR_HEIGHT);
+
+    setBlockDrag({
+      mode,
+      memberName,
+      entry: sourceEntry,
+      startClientY: event.clientY,
+      initialTopPx,
+      initialHeightPx,
+      previewTopPx: initialTopPx,
+      previewHeightPx: initialHeightPx,
+      hasMoved: false,
+    });
+  };
+
+  useEffect(() => {
+    if (!blockDrag) return;
+
+    const handleMove = (event: MouseEvent) => {
+      const deltaPx = event.clientY - blockDrag.startClientY;
+      const deltaMinutes = snapMinutes((deltaPx / HOUR_HEIGHT) * 60);
+      if (Math.abs(deltaPx) >= 3 && !blockDrag.hasMoved) {
+        setBlockDrag((prev) => (prev ? { ...prev, hasMoved: true } : prev));
+      }
+
+      setBlockDrag((prev) => {
+        if (!prev) return prev;
+        if (prev.mode === "move") {
+          const rawTop = prev.initialTopPx + (deltaMinutes / 60) * HOUR_HEIGHT;
+          const maxTop = HOURS_IN_DAY * HOUR_HEIGHT - prev.initialHeightPx;
+          const nextTop = Math.max(0, Math.min(maxTop, rawTop));
+          return { ...prev, previewTopPx: nextTop, previewHeightPx: prev.initialHeightPx };
+        }
+        if (prev.mode === "resize-start") {
+          const endPx = prev.initialTopPx + prev.initialHeightPx;
+          const rawTop = prev.initialTopPx + (deltaMinutes / 60) * HOUR_HEIGHT;
+          const maxTop = endPx - MIN_BLOCK_HEIGHT;
+          const nextTop = Math.max(0, Math.min(maxTop, rawTop));
+          const nextHeight = Math.max(MIN_BLOCK_HEIGHT, endPx - nextTop);
+          return { ...prev, previewTopPx: nextTop, previewHeightPx: nextHeight };
+        }
+        const rawHeight = prev.initialHeightPx + (deltaMinutes / 60) * HOUR_HEIGHT;
+        const maxHeight = HOURS_IN_DAY * HOUR_HEIGHT - prev.initialTopPx;
+        const nextHeight = Math.max(MIN_BLOCK_HEIGHT, Math.min(maxHeight, rawHeight));
+        return { ...prev, previewTopPx: prev.initialTopPx, previewHeightPx: nextHeight };
+      });
+    };
+
+    const handleUp = async () => {
+      const finalDrag = blockDrag;
+      setBlockDrag(null);
+      if (!finalDrag) return;
+      if (!finalDrag.hasMoved) {
+        openEntryModal(finalDrag.entry, finalDrag.memberName);
+        return;
+      }
+      suppressBlockClickUntilRef.current = Date.now() + 250;
+
+      const nextStartMinute = Math.max(0, Math.round((finalDrag.previewTopPx / HOUR_HEIGHT) * 60));
+      const nextDurationMinutes = Math.max(
+        Math.ceil((MIN_BLOCK_HEIGHT / HOUR_HEIGHT) * 60),
+        Math.round((finalDrag.previewHeightPx / HOUR_HEIGHT) * 60)
+      );
+      const nextEndMinute = Math.min(24 * 60, nextStartMinute + nextDurationMinutes);
+      const startAt = minuteToIso(date, nextStartMinute);
+      const stopAt = minuteToIso(date, nextEndMinute);
+
+      try {
+        const res = await fetch("/api/time-entries/update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            member: finalDrag.memberName,
+            entryId: finalDrag.entry.id,
+            description: finalDrag.entry.description ?? "",
+            project: finalDrag.entry.project_name ?? "",
+            startAt,
+            stopAt,
+            tzOffset: new Date().getTimezoneOffset(),
+          }),
+        });
+        const payload = (await res.json()) as { error?: string };
+        if (!res.ok || payload.error) throw new Error(payload.error || "Failed to update entry");
+        setRefreshTick((value) => value + 1);
+        window.dispatchEvent(
+          new CustomEvent("voho-entries-changed", { detail: { memberName: finalDrag.memberName } })
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to update entry");
+      }
+    };
+
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+  }, [blockDrag, date]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -1203,19 +1323,35 @@ export default function TimeDashboard({
                       {timeline.blocks.map((block) => {
                         const sourceEntry = data.entries.find((entry) => `${entry.id}-${new Date(entry.start).getTime()}` === block.id);
                         const blockStyle = getProjectBlockStyle(block.project, block.projectColor);
+                        const isDraggingThis =
+                          !!sourceEntry &&
+                          blockDrag?.entry.id === sourceEntry.id &&
+                          blockDrag.memberName.toLowerCase() === member.toLowerCase();
+                        const topPx = isDraggingThis ? blockDrag.previewTopPx : block.topPx;
+                        const heightPx = isDraggingThis ? blockDrag.previewHeightPx : block.heightPx;
                         return (
-                        <button
+                        <div
                           key={block.id}
-                          type="button"
-                          className="absolute overflow-hidden rounded-lg border px-2 py-1 text-left shadow-sm"
+                          role="button"
+                          tabIndex={0}
+                          className={`absolute overflow-hidden rounded-lg border px-2 py-1 text-left shadow-sm ${
+                            sourceEntry?.stop === null ? "cursor-default" : "cursor-move"
+                          } ${isDraggingThis ? "ring-2 ring-sky-300" : ""}`}
                           style={{
-                            top: `${block.topPx}px`,
-                            height: `${block.heightPx}px`,
+                            top: `${topPx}px`,
+                            height: `${heightPx}px`,
                             left: `calc(${(block.lane / timeline.maxLanes) * 100}% + 0.25rem)`,
                             width: `calc(${100 / timeline.maxLanes}% - 0.5rem)`,
                             ...blockStyle,
                           }}
                           title={sourceEntry ? getEntryTooltipText(sourceEntry, member) : undefined}
+                          onKeyDown={(event) => {
+                            if (!sourceEntry) return;
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              openEntryModal(sourceEntry, member);
+                            }
+                          }}
                           onMouseEnter={(event) => {
                             if (!sourceEntry) return;
                             placeHoverTooltip(event, getEntryTooltipText(sourceEntry, member));
@@ -1225,15 +1361,32 @@ export default function TimeDashboard({
                             placeHoverTooltip(event, getEntryTooltipText(sourceEntry, member));
                           }}
                           onMouseLeave={hideHoverTooltip}
+                          onMouseDown={(event) => {
+                            if (!sourceEntry) return;
+                            startBlockDrag(event, "move", sourceEntry, member);
+                          }}
                           onClick={() => {
+                            if (Date.now() < suppressBlockClickUntilRef.current) return;
                             if (!sourceEntry) return;
                             openEntryModal(sourceEntry, member);
                           }}
                         >
+                          {sourceEntry?.stop !== null && (
+                            <div
+                              className="absolute inset-x-0 top-0 h-2 cursor-ns-resize"
+                              onMouseDown={(event) => startBlockDrag(event, "resize-start", sourceEntry, member)}
+                            />
+                          )}
                           <div className="overflow-hidden">
                             <p className="truncate text-xs font-semibold text-slate-900">{block.title}</p>
                           </div>
-                        </button>
+                          {sourceEntry?.stop !== null && (
+                            <div
+                              className="absolute inset-x-0 bottom-0 h-2 cursor-ns-resize"
+                              onMouseDown={(event) => startBlockDrag(event, "resize-end", sourceEntry, member)}
+                            />
+                          )}
+                        </div>
                       );
                       })}
                     </div>
