@@ -605,6 +605,7 @@ export async function startManualTimer(input: {
   description: string | null;
   projectName: string | null;
   tzOffsetMinutes?: number | null;
+  elapsedSeconds?: number | null;
 }) {
   if (!isSupabaseConfigured()) {
     throw new Error("Supabase history is not configured");
@@ -616,12 +617,14 @@ export async function startManualTimer(input: {
   }
 
   const tzOffsetMinutes = parseTzOffsetMinutes(input.tzOffsetMinutes);
+  const elapsedSeconds = Math.max(0, Math.floor(Number(input.elapsedSeconds ?? 0)));
   const now = new Date();
+  const startAt = new Date(now.getTime() - elapsedSeconds * 1000);
   const nowIso = now.toISOString();
-  const sourceDate = toLocalDateKey(now, tzOffsetMinutes);
+  const sourceDate = toLocalDateKey(startAt, tzOffsetMinutes);
   await ensureMember(input.memberName);
   const { projectKey, projectName } = await ensureManualProject(input.projectName);
-  const sourceEntryId = `manual:${input.memberName}:${now.getTime()}`;
+  const sourceEntryId = `manual:${input.memberName}:${startAt.getTime()}:${elapsedSeconds}`;
 
   const payload = [
     {
@@ -630,9 +633,9 @@ export async function startManualTimer(input: {
       member_name: input.memberName,
       project_key: projectKey,
       description: normalizeDescription(input.description),
-      start_at: nowIso,
+      start_at: startAt.toISOString(),
       stop_at: null,
-      duration_seconds: 0,
+      duration_seconds: elapsedSeconds,
       is_running: true,
       tags: [],
       source_date: sourceDate,
@@ -781,6 +784,69 @@ export async function updateRunningEntryMetadata(input: {
   } satisfies RunningEntry;
 }
 
+export async function backdateRunningEntry(input: {
+  memberName: string;
+  elapsedSeconds: number;
+  description: string | null;
+  projectName: string | null;
+  tzOffsetMinutes?: number | null;
+}) {
+  if (!isSupabaseConfigured()) {
+    throw new Error("Supabase history is not configured");
+  }
+
+  const running = await getRunningEntry(input.memberName);
+  if (!running) return null;
+
+  const elapsedSeconds = Math.max(0, Math.floor(input.elapsedSeconds));
+  const startAt = new Date(Date.now() - elapsedSeconds * 1000);
+  const tzOffsetMinutes = parseTzOffsetMinutes(input.tzOffsetMinutes);
+  const sourceDate = toLocalDateKey(startAt, tzOffsetMinutes);
+  const { projectKey, projectName } = await ensureManualProject(input.projectName);
+  const nowIso = new Date().toISOString();
+
+  const response = await fetch(`${getBaseUrl()}/rest/v1/time_entries?toggl_entry_id=eq.${running.id}`, {
+    method: "PATCH",
+    headers: {
+      ...supabaseHeaders(),
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify({
+      start_at: startAt.toISOString(),
+      duration_seconds: elapsedSeconds,
+      source_date: sourceDate,
+      project_key: projectKey,
+      description: normalizeDescription(input.description),
+      synced_at: nowIso,
+      raw: {
+        source: "manual",
+        action: "backdate_running",
+        edited_at: nowIso,
+      },
+    }),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error("Failed to backdate running timer");
+  }
+
+  const rows = (await response.json()) as StoredEntryRow[];
+  const updated = rows[0];
+  if (!updated) {
+    throw new Error("Backdate running timer returned no row");
+  }
+
+  return {
+    id: updated.toggl_entry_id,
+    member: updated.member_name,
+    description: updated.description,
+    projectName,
+    startAt: updated.start_at,
+    durationSeconds: Math.max(0, updated.duration_seconds),
+    source: updated.entry_source || "manual",
+  } satisfies RunningEntry;
+}
+
 export async function createManualTimeEntry(input: {
   memberName: string;
   description: string | null;
@@ -804,7 +870,9 @@ export async function createManualTimeEntry(input: {
   const sourceDate = toLocalDateKey(startAt, tzOffsetMinutes);
   await ensureMember(input.memberName);
   const { projectKey, projectName } = await ensureManualProject(input.projectName);
-  const sourceEntryId = `manual:${input.memberName}:${startAt.getTime()}:${durationSeconds}`;
+  const sourceEntryId = `manual:${input.memberName}:${startAt.getTime()}:${durationSeconds}:${Date.now()}:${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
 
   const payload = [
     {
@@ -828,11 +896,11 @@ export async function createManualTimeEntry(input: {
     },
   ];
 
-  const response = await fetch(`${getBaseUrl()}/rest/v1/time_entries?on_conflict=entry_source,source_entry_id`, {
+  const response = await fetch(`${getBaseUrl()}/rest/v1/time_entries`, {
     method: "POST",
     headers: {
       ...supabaseHeaders(),
-      Prefer: "resolution=merge-duplicates,return=representation",
+      Prefer: "return=representation",
     },
     body: JSON.stringify(payload),
     cache: "no-store",

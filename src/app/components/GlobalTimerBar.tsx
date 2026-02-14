@@ -314,53 +314,71 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
     setTimerInput(formatTimerFixedHours(durationMinutes * 60));
     setBusy(true);
     try {
+      const elapsedSeconds = Math.max(1, Math.round(durationMinutes * 60));
       if (current) {
-        await persistRunningDraft(description, projectName);
-        const stopRes = await fetch("/api/time-entries/stop", {
-          method: "POST",
+        const patchRes = await fetch("/api/time-entries/current", {
+          method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ member: memberName, tzOffset: new Date().getTimezoneOffset() }),
+          body: JSON.stringify({
+            member: memberName,
+            description,
+            project: projectName,
+            elapsedSeconds,
+            tzOffset: new Date().getTimezoneOffset(),
+          }),
         });
-        if (!stopRes.ok) {
-          setTimerInputError("Failed to stop active timer first");
+        const patchData = (await patchRes.json()) as { current?: RunningTimer | null; error?: string };
+        if (!patchRes.ok || patchData.error || !patchData.current) {
+          setTimerInputError(patchData.error || "Failed to update running timer");
           return;
         }
-        setCurrent(null);
+        setCurrent(patchData.current);
         window.dispatchEvent(
           new CustomEvent("voho-timer-changed", {
             detail: {
               memberName,
-              isRunning: false,
-              startAt: null,
-              durationSeconds: 0,
+              isRunning: true,
+              startAt: patchData.current.startAt,
+              durationSeconds: patchData.current.durationSeconds,
+              description: patchData.current.description ?? description,
+              projectName: patchData.current.projectName ?? projectName,
+            },
+          })
+        );
+      } else {
+        const res = await fetch("/api/time-entries/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            member: memberName,
+            description,
+            project: projectName,
+            elapsedSeconds,
+            tzOffset: new Date().getTimezoneOffset(),
+          }),
+        });
+        const data = (await res.json()) as { current?: RunningTimer | null; error?: string };
+        if (!res.ok || data.error || !data.current) {
+          setTimerInputError(data.error || "Failed to start timer");
+          return;
+        }
+        setCurrent(data.current);
+        window.dispatchEvent(
+          new CustomEvent("voho-timer-changed", {
+            detail: {
+              memberName,
+              isRunning: true,
+              startAt: data.current.startAt,
+              durationSeconds: data.current.durationSeconds,
+              description: data.current.description ?? description,
+              projectName: data.current.projectName ?? projectName,
             },
           })
         );
       }
-
-      const startAtIso = new Date(Date.now() - durationMinutes * 60 * 1000).toISOString();
-      const res = await fetch("/api/time-entries/manual", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          member: memberName,
-          description,
-          project: projectName,
-          startAt: startAtIso,
-          durationMinutes,
-          tzOffset: new Date().getTimezoneOffset(),
-        }),
-      });
-      if (!res.ok) {
-        const payload = (await res.json()) as { error?: string };
-        setTimerInputError(payload.error || "Failed to add duration entry");
-        return;
-      }
-      setTimerInput("0:00:00");
-      setTimerInputDirty(false);
       window.dispatchEvent(new CustomEvent("voho-entries-changed", { detail: { memberName } }));
     } catch {
-      setTimerInputError("Failed to add duration entry");
+      setTimerInputError("Failed to start timer");
     } finally {
       setBusy(false);
     }

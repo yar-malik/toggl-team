@@ -9,6 +9,7 @@ type StartRequest = {
   description?: string | null;
   project?: string | null;
   tzOffset?: number;
+  elapsedSeconds?: number;
 };
 
 export async function POST(request: NextRequest) {
@@ -34,6 +35,7 @@ export async function POST(request: NextRequest) {
       description: body.description ?? null,
       projectName: body.project ?? null,
       tzOffsetMinutes: body.tzOffset,
+      elapsedSeconds: body.elapsedSeconds,
     });
     if (!result.started) {
       return NextResponse.json(

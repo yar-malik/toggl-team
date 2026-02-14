@@ -33,7 +33,10 @@ function hashText(value: string): number {
 export function getProjectBaseColor(projectName: string, explicitColor?: string | null): string {
   const rawExplicit = explicitColor?.trim() ?? "";
   if (/^#[0-9a-fA-F]{6}$/.test(rawExplicit)) {
-    return rawExplicit.toUpperCase();
+    const normalizedExplicit = rawExplicit.toUpperCase();
+    if (PALETTE_SET.has(normalizedExplicit)) {
+      return normalizedExplicit;
+    }
   }
   const normalized = projectName.trim().toLowerCase();
   if (!normalized || normalized === "no project") return "#CBD5E1";
@@ -51,7 +54,8 @@ export function hexToRgb(hex: string): { r: number; g: number; b: number } | nul
 }
 
 export function getProjectSurfaceColors(projectName: string, explicitColor?: string | null): { borderColor: string; backgroundColor: string } {
-  const rgb = hexToRgb(getProjectBaseColor(projectName, explicitColor));
+  const base = getProjectBaseColor(projectName, explicitColor);
+  const rgb = hexToRgb(base);
   if (!rgb) {
     return {
       borderColor: "rgb(148 163 184 / 0.80)",
@@ -59,7 +63,8 @@ export function getProjectSurfaceColors(projectName: string, explicitColor?: str
     };
   }
   return {
-    borderColor: `rgb(${rgb.r} ${rgb.g} ${rgb.b} / 0.88)`,
-    backgroundColor: `rgb(${rgb.r} ${rgb.g} ${rgb.b} / 0.52)`,
+    // Keep calendar and project colors visually identical.
+    borderColor: base,
+    backgroundColor: base,
   };
 }

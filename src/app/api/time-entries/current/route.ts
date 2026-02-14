@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRunningEntry, resolveCanonicalMemberName, updateRunningEntryMetadata } from "@/lib/manualTimeEntriesStore";
+import { backdateRunningEntry, getRunningEntry, resolveCanonicalMemberName, updateRunningEntryMetadata } from "@/lib/manualTimeEntriesStore";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -34,6 +34,8 @@ type UpdateCurrentBody = {
   member?: string;
   description?: string | null;
   project?: string | null;
+  elapsedSeconds?: number;
+  tzOffset?: number;
 };
 
 export async function PATCH(request: NextRequest) {
@@ -55,11 +57,21 @@ export async function PATCH(request: NextRequest) {
   }
 
   try {
-    const updated = await updateRunningEntryMetadata({
-      memberName: canonicalMember,
-      description: body.description ?? null,
-      projectName: body.project ?? null,
-    });
+    const elapsedSeconds = Number(body.elapsedSeconds);
+    const updated =
+      Number.isFinite(elapsedSeconds) && elapsedSeconds >= 0
+        ? await backdateRunningEntry({
+            memberName: canonicalMember,
+            elapsedSeconds,
+            description: body.description ?? null,
+            projectName: body.project ?? null,
+            tzOffsetMinutes: body.tzOffset,
+          })
+        : await updateRunningEntryMetadata({
+            memberName: canonicalMember,
+            description: body.description ?? null,
+            projectName: body.project ?? null,
+          });
     return NextResponse.json({
       ok: true,
       member: canonicalMember,
