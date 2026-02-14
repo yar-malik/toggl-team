@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import GlobalTimerBar from "@/app/components/GlobalTimerBar";
 import {
@@ -166,6 +166,7 @@ export default function PlatformShell({
   currentMemberName: string | null;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [timerStartAt, setTimerStartAt] = useState<string | null>(null);
   const [fallbackDurationSeconds, setFallbackDurationSeconds] = useState(0);
   const [currentTaskLabel, setCurrentTaskLabel] = useState<string>("");
@@ -390,17 +391,30 @@ export default function PlatformShell({
                     <span>KPIs</span>
                   </span>
                 </Link>
-                <Link href="/pomodoro" prefetch className={navClass(isActive(pathname, "/pomodoro"))}>
-                  <span className="inline-flex items-center gap-2">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => router.push("/pomodoro")}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      router.push("/pomodoro");
+                    }
+                  }}
+                  className={`flex items-center justify-between rounded-lg border px-3 py-2 text-xs ${
+                    isActive(pathname, "/pomodoro")
+                      ? "border-sky-300 bg-sky-100 text-sky-900"
+                      : "border-sky-200 bg-sky-50 text-slate-700"
+                  }`}
+                >
+                  <span className="inline-flex items-center gap-2 font-medium tabular-nums">
                     <PomodoroIcon className={iconClass()} />
-                    <span>Pomodoro</span>
+                    <span>Pomodoro {formatPomodoroTimer(pomodoroState.secondsLeft)}</span>
                   </span>
-                </Link>
-                <div className="flex items-center justify-between rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-slate-700">
-                  <span className="font-medium tabular-nums">Pomodoro {formatPomodoroTimer(pomodoroState.secondsLeft)}</span>
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={(event) => {
+                      event.stopPropagation();
                       setPomodoroState((prev) => {
                         const next: PomodoroState = {
                           ...prev,
