@@ -411,7 +411,7 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
                 void createDurationEntry();
               }
             }}
-            placeholder="0:00:00 / 25 min / 1 hour"
+            placeholder="0:00:00"
             readOnly={Boolean(current)}
             disabled={busy}
             className={`h-11 rounded-lg border px-3 text-right text-3xl font-semibold tabular-nums text-slate-900 outline-none disabled:cursor-not-allowed disabled:bg-slate-100 ${
