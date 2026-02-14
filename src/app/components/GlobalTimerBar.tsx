@@ -36,6 +36,12 @@ function parseDurationMinutes(input: string): number | null {
   const raw = input.trim().toLowerCase();
   if (!raw) return null;
 
+  if (/^\d+:\d{2}:\d{2}$/.test(raw)) {
+    const [hours, minutes, seconds] = raw.split(":").map(Number);
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes) || !Number.isFinite(seconds)) return null;
+    return Math.max(1, Math.round(hours * 60 + minutes + seconds / 60));
+  }
+
   if (/^\d+:\d{1,2}$/.test(raw)) {
     const [hours, minutes] = raw.split(":").map(Number);
     if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
@@ -70,7 +76,7 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
   const [projectName, setProjectName] = useState("");
   const [nowMs, setNowMs] = useState(0);
   const [busy, setBusy] = useState(false);
-  const [timerInput, setTimerInput] = useState("");
+  const [timerInput, setTimerInput] = useState("0:00:00");
   const [timerInputError, setTimerInputError] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
@@ -281,6 +287,8 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
 
   const createDurationEntry = useCallback(async () => {
     if (!memberName || current) return;
+    const normalizedInput = timerInput.trim();
+    if (!normalizedInput || normalizedInput === "0:00:00") return;
     const durationMinutes = parseDurationMinutes(timerInput);
     if (!durationMinutes) {
       setTimerInputError("Use a format like 25 min or 1 hour");
@@ -308,7 +316,7 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
         setTimerInputError(payload.error || "Failed to add duration entry");
         return;
       }
-      setTimerInput("");
+      setTimerInput("0:00:00");
       window.dispatchEvent(new CustomEvent("voho-entries-changed", { detail: { memberName } }));
     } catch {
       setTimerInputError("Failed to add duration entry");
@@ -404,6 +412,10 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
               setTimerInput(event.target.value);
               if (timerInputError) setTimerInputError(null);
             }}
+            onFocus={(event) => {
+              if (current) return;
+              event.currentTarget.select();
+            }}
             onKeyDown={(event) => {
               if (current) return;
               if (event.key === "Enter") {
@@ -481,6 +493,7 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
                 setCurrent(null);
                 setDescription("");
                 setProjectName("");
+                setTimerInput("0:00:00");
                 window.dispatchEvent(
                   new CustomEvent("voho-timer-changed", {
                     detail: {
