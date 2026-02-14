@@ -77,6 +77,15 @@ function parseDurationMinutes(input: string): number | null {
   return null;
 }
 
+function isZeroLikeTimerInput(input: string): boolean {
+  const raw = input.trim().toLowerCase();
+  if (!raw) return true;
+  if (raw === "0:00:00" || raw === "00:00:00" || raw === "0" || raw === "0m" || raw === "0min" || raw === "0 min") {
+    return true;
+  }
+  return /^0+:0{1,2}(?::0{1,2})?$/.test(raw);
+}
+
 export default function GlobalTimerBar({ memberName }: { memberName: string | null }) {
   const [current, setCurrent] = useState<RunningTimer | null>(null);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
@@ -506,6 +515,17 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
           disabled={busy || Boolean(current)}
           onClick={async () => {
             if (!memberName) return;
+            const hasCustomDuration = !isZeroLikeTimerInput(timerInput);
+            if (hasCustomDuration) {
+              const parsedMinutes = parseDurationMinutes(timerInput);
+              if (!parsedMinutes) {
+                setTimerInputError("Use a format like 25 min or 1 hour");
+                return;
+              }
+              await createDurationEntry();
+              setTimerInputDirty(false);
+              return;
+            }
             setBusy(true);
             try {
               const res = await fetch("/api/time-entries/start", {
