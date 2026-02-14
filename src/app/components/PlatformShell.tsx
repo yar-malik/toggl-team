@@ -384,7 +384,7 @@ export default function PlatformShell({
                 </Link>
                 <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-sky-700">Timer</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-sky-700">Pomodoro</p>
                     <button
                       type="button"
                       onClick={() => {
@@ -404,9 +404,7 @@ export default function PlatformShell({
                       )}
                     </button>
                   </div>
-                  <p className="mt-1 text-sm font-semibold tabular-nums text-slate-800">
-                    timer is {formatTimer(pomodoroSecondsLeft)}
-                  </p>
+                  <p className="mt-1 text-sm font-semibold tabular-nums text-slate-800">{formatTimer(pomodoroSecondsLeft)}</p>
                 </div>
               </div>
             </div>
