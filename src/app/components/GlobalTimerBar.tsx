@@ -22,6 +22,8 @@ type PendingDraft = {
   projectName: string;
 };
 
+const PENDING_DRAFT_STORAGE_KEY = "voho_pending_running_draft";
+
 function formatTimer(totalSeconds: number): string {
   const safe = Math.max(0, Math.floor(totalSeconds));
   const h = Math.floor(safe / 3600);
@@ -43,6 +45,29 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
   const latestDraftRef = useRef({ description: "", projectName: "" });
   const saveControllerRef = useRef<AbortController | null>(null);
   const failedDraftRef = useRef<PendingDraft | null>(null);
+
+  const writePendingDraftToStorage = useCallback(
+    (draft: PendingDraft | null) => {
+      try {
+        if (!draft || !memberName) {
+          localStorage.removeItem(PENDING_DRAFT_STORAGE_KEY);
+          return;
+        }
+        localStorage.setItem(
+          PENDING_DRAFT_STORAGE_KEY,
+          JSON.stringify({
+            member: memberName,
+            description: draft.description,
+            projectName: draft.projectName,
+            savedAt: Date.now(),
+          })
+        );
+      } catch {
+        // Ignore storage failures.
+      }
+    },
+    [memberName]
+  );
 
   useEffect(() => {
     const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
@@ -106,11 +131,13 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
         });
         if (!response.ok) {
           failedDraftRef.current = { description: nextDescription, projectName: nextProjectName };
+          writePendingDraftToStorage(failedDraftRef.current);
           return;
         }
         const payload = (await response.json()) as { current?: RunningTimer | null };
         if (payload.current) {
           failedDraftRef.current = null;
+          writePendingDraftToStorage(null);
           setCurrent(payload.current);
           window.dispatchEvent(
             new CustomEvent("voho-timer-changed", {
@@ -128,6 +155,7 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") return;
         failedDraftRef.current = { description: nextDescription, projectName: nextProjectName };
+        writePendingDraftToStorage(failedDraftRef.current);
         // Best-effort.
       } finally {
         if (!keepalive && controller && saveControllerRef.current === controller) {
@@ -135,7 +163,7 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
         }
       }
     },
-    [current, memberName]
+    [current, memberName, writePendingDraftToStorage]
   );
 
   useEffect(() => {
@@ -155,7 +183,8 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
   useEffect(() => {
     if (current) return;
     failedDraftRef.current = null;
-  }, [current]);
+    writePendingDraftToStorage(null);
+  }, [current, writePendingDraftToStorage]);
 
   useEffect(() => {
     if (!current || !memberName) return;
@@ -165,6 +194,24 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
       void persistRunningDraft(pending.description, pending.projectName);
     }, 3000);
     return () => window.clearInterval(retryId);
+  }, [current, memberName, persistRunningDraft]);
+
+  useEffect(() => {
+    if (!current || !memberName) return;
+    try {
+      const raw = localStorage.getItem(PENDING_DRAFT_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { member?: string; description?: string; projectName?: string };
+      if (!parsed.member || parsed.member !== memberName) return;
+      const pending: PendingDraft = {
+        description: parsed.description ?? "",
+        projectName: parsed.projectName ?? "",
+      };
+      failedDraftRef.current = pending;
+      void persistRunningDraft(pending.description, pending.projectName);
+    } catch {
+      // Ignore invalid storage value.
+    }
   }, [current, memberName, persistRunningDraft]);
 
   useEffect(() => {

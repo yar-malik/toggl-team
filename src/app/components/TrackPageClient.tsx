@@ -499,7 +499,14 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
     [projects, entryEditor?.project]
   );
 
-  function emitTimerChanged(detail: { memberName: string; isRunning: boolean; startAt?: string | null; durationSeconds?: number }) {
+  function emitTimerChanged(detail: {
+    memberName: string;
+    isRunning: boolean;
+    startAt?: string | null;
+    durationSeconds?: number;
+    description?: string | null;
+    projectName?: string | null;
+  }) {
     window.dispatchEvent(new CustomEvent("voho-timer-changed", { detail }));
   }
 
@@ -922,6 +929,8 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
                           isRunning: true,
                           startAt: startData.current.startAt,
                           durationSeconds: startData.current.durationSeconds,
+                          description: startData.current.description ?? entryEditor.description,
+                          projectName: startData.current.projectName ?? entryEditor.project,
                         });
                       }
 
