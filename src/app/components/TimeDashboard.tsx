@@ -438,6 +438,7 @@ export default function TimeDashboard({
     startTime: string;
     stopTime: string;
     saving: boolean;
+    deleting: boolean;
     error: string | null;
   } | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -821,6 +822,7 @@ export default function TimeDashboard({
       startTime: formatTimeInputLocal(entry.start),
       stopTime: formatTimeInputLocal(entry.stop),
       saving: false,
+      deleting: false,
       error: null,
     });
   };
@@ -1780,55 +1782,102 @@ export default function TimeDashboard({
                   </span>
                 </div>
                 {entryEditor.error && <p className="text-xs text-rose-600">{entryEditor.error}</p>}
-                <button
-                  type="button"
-                  disabled={entryEditor.saving}
-                  onClick={async () => {
-                    if (!selectedEntry) return;
-                    const startIso = buildIsoFromDateAndTime(date, entryEditor.startTime);
-                    const stopIso = buildIsoFromDateAndTime(date, entryEditor.stopTime);
-                    if (!startIso || !stopIso || new Date(stopIso).getTime() <= new Date(startIso).getTime()) {
-                      setEntryEditor((prev) =>
-                        prev ? { ...prev, error: "Choose a valid start and end time (end must be after start)." } : prev
-                      );
-                      return;
-                    }
-                    setEntryEditor((prev) => (prev ? { ...prev, saving: true, error: null } : prev));
-                    try {
-                      const res = await fetch("/api/time-entries/update", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                          member: selectedEntry.memberName,
-                          entryId: selectedEntry.entryId,
-                          description: entryEditor.description,
-                          project: entryEditor.project,
-                          startAt: startIso,
-                          stopAt: stopIso,
-                          tzOffset: new Date().getTimezoneOffset(),
-                        }),
-                      });
-                      const payload = (await res.json()) as { error?: string };
-                      if (!res.ok || payload.error) {
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={entryEditor.saving || entryEditor.deleting}
+                    onClick={async () => {
+                      if (!selectedEntry) return;
+                      const shouldDelete = window.confirm("Delete this time entry?");
+                      if (!shouldDelete) return;
+                      setEntryEditor((prev) => (prev ? { ...prev, deleting: true, error: null } : prev));
+                      try {
+                        const res = await fetch("/api/time-entries/delete", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            member: selectedEntry.memberName,
+                            entryId: selectedEntry.entryId,
+                          }),
+                        });
+                        const payload = (await res.json()) as { error?: string; wasRunning?: boolean };
+                        if (!res.ok || payload.error) {
+                          setEntryEditor((prev) =>
+                            prev ? { ...prev, deleting: false, error: payload.error || "Failed to delete entry." } : prev
+                          );
+                          return;
+                        }
+                        setSelectedEntry(null);
+                        setEntryEditor(null);
+                        setRefreshTick((value) => value + 1);
+                        window.dispatchEvent(
+                          new CustomEvent("voho-entries-changed", { detail: { memberName: selectedEntry.memberName } })
+                        );
+                        if (payload.wasRunning) {
+                          window.dispatchEvent(
+                            new CustomEvent("voho-timer-changed", {
+                              detail: { memberName: selectedEntry.memberName, isRunning: false },
+                            })
+                          );
+                        }
+                      } catch {
+                        setEntryEditor((prev) => (prev ? { ...prev, deleting: false, error: "Failed to delete entry." } : prev));
+                      }
+                    }}
+                    className="rounded-xl border border-rose-300 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                  >
+                    {entryEditor.deleting ? "Deleting..." : "Delete entry"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={entryEditor.saving || entryEditor.deleting}
+                    onClick={async () => {
+                      if (!selectedEntry) return;
+                      const startIso = buildIsoFromDateAndTime(date, entryEditor.startTime);
+                      const stopIso = buildIsoFromDateAndTime(date, entryEditor.stopTime);
+                      if (!startIso || !stopIso || new Date(stopIso).getTime() <= new Date(startIso).getTime()) {
                         setEntryEditor((prev) =>
-                          prev ? { ...prev, saving: false, error: payload.error || "Failed to update entry." } : prev
+                          prev ? { ...prev, error: "Choose a valid start and end time (end must be after start)." } : prev
                         );
                         return;
                       }
-                      setSelectedEntry(null);
-                      setEntryEditor(null);
-                      setRefreshTick((value) => value + 1);
-                      window.dispatchEvent(
-                        new CustomEvent("voho-entries-changed", { detail: { memberName: selectedEntry.memberName } })
-                      );
-                    } catch {
-                      setEntryEditor((prev) => (prev ? { ...prev, saving: false, error: "Failed to update entry." } : prev));
-                    }
-                  }}
-                  className="w-[180px] rounded-xl bg-[#0BA5E9] px-4 py-2.5 text-xl font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
-                >
-                  {entryEditor.saving ? "Saving..." : "Save changes"}
-                </button>
+                      setEntryEditor((prev) => (prev ? { ...prev, saving: true, error: null } : prev));
+                      try {
+                        const res = await fetch("/api/time-entries/update", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            member: selectedEntry.memberName,
+                            entryId: selectedEntry.entryId,
+                            description: entryEditor.description,
+                            project: entryEditor.project,
+                            startAt: startIso,
+                            stopAt: stopIso,
+                            tzOffset: new Date().getTimezoneOffset(),
+                          }),
+                        });
+                        const payload = (await res.json()) as { error?: string };
+                        if (!res.ok || payload.error) {
+                          setEntryEditor((prev) =>
+                            prev ? { ...prev, saving: false, error: payload.error || "Failed to update entry." } : prev
+                          );
+                          return;
+                        }
+                        setSelectedEntry(null);
+                        setEntryEditor(null);
+                        setRefreshTick((value) => value + 1);
+                        window.dispatchEvent(
+                          new CustomEvent("voho-entries-changed", { detail: { memberName: selectedEntry.memberName } })
+                        );
+                      } catch {
+                        setEntryEditor((prev) => (prev ? { ...prev, saving: false, error: "Failed to update entry." } : prev));
+                      }
+                    }}
+                    className="w-[180px] rounded-xl bg-[#0BA5E9] px-4 py-2.5 text-xl font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+                  >
+                    {entryEditor.saving ? "Saving..." : "Save changes"}
+                  </button>
+                </div>
               </div>
             )}
           </div>
