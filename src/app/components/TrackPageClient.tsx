@@ -42,6 +42,7 @@ type TeamResponse = {
   members: Array<{ name: string; totalSeconds: number }>;
   error?: string;
 };
+type MembersResponse = { members?: Array<{ name?: string; member_name?: string }>; error?: string };
 
 type CalendarDraft = { hour: number; minute: number };
 type EntryEditorState = {
@@ -243,6 +244,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [weekTotalSeconds, setWeekTotalSeconds] = useState(0);
   const [dailyRanking, setDailyRanking] = useState<Array<{ name: string; seconds: number }>>([]);
+  const [dailyRankingWarning, setDailyRankingWarning] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(0);
@@ -460,6 +462,31 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
     };
 
     const loadDailyRanking = async () => {
+      const normalizeAndSort = (rows: Array<{ name: string; seconds: number }>) =>
+        [...rows].sort((a, b) => {
+          if (b.seconds !== a.seconds) return b.seconds - a.seconds;
+          const aIsYar = a.name.trim().toLowerCase() === "yar";
+          const bIsYar = b.name.trim().toLowerCase() === "yar";
+          if (aIsYar && !bIsYar) return -1;
+          if (!aIsYar && bIsYar) return 1;
+          return a.name.localeCompare(b.name);
+        });
+
+      const loadMembersFallback = async (warningMessage: string) => {
+        const membersData = await fetch(`/api/members?_req=${Date.now()}`, { cache: "no-store" }).then(async (res) => {
+          const data = (await res.json()) as MembersResponse;
+          if (!res.ok || data.error) throw new Error(data.error || "Failed to load members");
+          return data;
+        });
+        if (!active) return;
+        const rows = (membersData.members ?? [])
+          .map((member) => (member.name ?? member.member_name ?? "").trim())
+          .filter((name) => name.length > 0)
+          .map((name) => ({ name, seconds: 0 }));
+        setDailyRanking(normalizeAndSort(rows));
+        setDailyRankingWarning(warningMessage);
+      };
+
       try {
         const teamData = await fetch(
           `/api/team?date=${encodeURIComponent(date)}&tzOffset=${encodeURIComponent(
@@ -472,23 +499,25 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
           return data;
         });
         if (!active) return;
-        const rows = [...(teamData.members ?? [])]
+        const rows = (teamData.members ?? [])
           .map((member) => ({
             name: member.name,
             seconds: Math.max(0, Number(member.totalSeconds ?? 0)),
-          }))
-          .sort((a, b) => {
-            if (b.seconds !== a.seconds) return b.seconds - a.seconds;
-            const aIsYar = a.name.trim().toLowerCase() === "yar";
-            const bIsYar = b.name.trim().toLowerCase() === "yar";
-            if (aIsYar && !bIsYar) return -1;
-            if (!aIsYar && bIsYar) return 1;
-            return a.name.localeCompare(b.name);
-          });
-        setDailyRanking(rows);
+          }));
+        if (rows.length === 0) {
+          await loadMembersFallback("Team totals unavailable, showing members with 0h.");
+          return;
+        }
+        setDailyRanking(normalizeAndSort(rows));
+        setDailyRankingWarning(null);
       } catch {
-        if (!active) return;
-        setDailyRanking([]);
+        try {
+          await loadMembersFallback("Team totals unavailable, showing members with 0h.");
+        } catch {
+          if (!active) return;
+          setDailyRanking([]);
+          setDailyRankingWarning("Failed to load daily ranking.");
+        }
       }
     };
 
@@ -618,6 +647,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Daily ranking</p>
           <p className="text-xs text-slate-500">{date}</p>
         </div>
+        {dailyRankingWarning && <p className="mb-2 text-xs text-amber-700">{dailyRankingWarning}</p>}
         {dailyRanking.length === 0 ? (
           <p className="text-sm text-slate-500">No ranking data yet.</p>
         ) : (
