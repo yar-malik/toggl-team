@@ -919,14 +919,66 @@ export default function TimeDashboard({
   }, []);
 
   useEffect(() => {
-    const onEntriesChanged = () => {
-      setRefreshTick((value) => value + 1);
+    const onEntriesChanged = (event: Event) => {
+      const custom = event as CustomEvent<{ memberName?: string }>;
+      const changedMemberName = custom.detail?.memberName?.trim();
+      if (!changedMemberName) {
+        setRefreshTick((value) => value + 1);
+        return;
+      }
+
+      const requestParams = new URLSearchParams({
+        member: changedMemberName,
+        date,
+        tzOffset: String(new Date().getTimezoneOffset()),
+        _req: String(Date.now()),
+      });
+
+      fetch(`/api/entries?${requestParams.toString()}`, { cache: "no-store" })
+        .then(async (res) => {
+          const payload = (await res.json()) as EntriesResponse;
+          if (!res.ok || payload.error) throw new Error(payload.error || "Failed to refresh member entries");
+          return payload;
+        })
+        .then((payload) => {
+          const changedLower = changedMemberName.toLowerCase();
+
+          setTeamData((prev) => {
+            if (!prev) return prev;
+            const nextMembers = prev.members.map((memberData) => {
+              if (memberData.name.trim().toLowerCase() !== changedLower) return memberData;
+              const latestEndMs = payload.entries.reduce((latest, entry) => {
+                const endMs = getEntryEndMs(entry);
+                if (Number.isNaN(endMs)) return latest;
+                return Math.max(latest, endMs);
+              }, Number.NEGATIVE_INFINITY);
+              return {
+                ...memberData,
+                entries: payload.entries,
+                current: payload.current,
+                totalSeconds: payload.totalSeconds,
+                lastActivityAt: Number.isFinite(latestEndMs) ? new Date(latestEndMs).toISOString() : memberData.lastActivityAt,
+              };
+            });
+            return { ...prev, members: nextMembers };
+          });
+
+          setData((prev) => {
+            if (!prev) return prev;
+            if (member.trim().toLowerCase() !== changedLower) return prev;
+            return payload;
+          });
+        })
+        .catch(() => {
+          // Fallback to full refresh when targeted patch fails.
+          setRefreshTick((value) => value + 1);
+        });
     };
     window.addEventListener("voho-entries-changed", onEntriesChanged as EventListener);
     return () => {
       window.removeEventListener("voho-entries-changed", onEntriesChanged as EventListener);
     };
-  }, []);
+  }, [date, member]);
 
   const runningEntry = useMemo(() => {
     if (!data?.current) return null;
@@ -956,7 +1008,7 @@ export default function TimeDashboard({
   }, [teamData]);
 
   const dailyRankingSeries = useMemo(() => {
-    if (!teamData) return [] as Array<{ name: string; seconds: number }>;
+    if (!teamData) return [] as Array<{ name: string; seconds: number; isRunning: boolean }>;
     const allowed = new Set(selectedMembers.map((item) => item.trim().toLowerCase()));
     return teamData.members
       .filter((memberData) => {
@@ -966,9 +1018,11 @@ export default function TimeDashboard({
       .map((memberData) => {
         const cardEntries = memberData.entries.filter((entry) => !isExcludedFromRanking(entry.project_name));
         const cardTotalSeconds = cardEntries.reduce((sum, entry) => sum + getEntrySeconds(entry), 0);
+        const isRunning = Boolean(memberData.current ?? cardEntries.find((entry) => entry.stop === null));
         return {
           name: memberData.name,
           seconds: cardTotalSeconds,
+          isRunning,
         };
       })
       .sort((a, b) => {
@@ -979,10 +1033,15 @@ export default function TimeDashboard({
 
   const dailyRankingMaxHours = useMemo(() => {
     const maxSeconds = dailyRankingSeries.reduce((max, row) => Math.max(max, row.seconds), 0);
-    const rawHours = maxSeconds / 3600;
-    const rounded = Math.ceil(rawHours);
-    return Math.max(1, rounded);
+    const maxHours = maxSeconds / 3600;
+    return Math.max(1, Math.ceil(maxHours));
   }, [dailyRankingSeries]);
+  const dailyRankingAxisTicks = useMemo(() => {
+    return [4, 3, 2, 1, 0].map((step) => ({
+      step,
+      value: Math.round((dailyRankingMaxHours * step) / 4),
+    }));
+  }, [dailyRankingMaxHours]);
 
   const teamTimeline = useMemo(() => {
     if (!teamData) return [] as Array<{ name: string; blocks: TimelineBlock[]; maxLanes: number }>;
@@ -1296,15 +1355,14 @@ export default function TimeDashboard({
             ) : (
               <div className="mt-3 grid grid-cols-[3.2rem_1fr] gap-2">
                 <div className="relative h-40">
-                  {[0, 1, 2, 3, 4].map((step) => {
-                    const value = Math.round((dailyRankingMaxHours * (4 - step)) * 10) / 10;
+                  {dailyRankingAxisTicks.map((tick) => {
                     return (
                       <div
-                        key={step}
+                        key={tick.step}
                         className="absolute right-0 text-[10px] font-medium text-slate-500"
-                        style={{ top: `${step * 25 - 6}%` }}
+                        style={{ top: `${(4 - tick.step) * 25}%`, transform: "translateY(-50%)" }}
                       >
-                        {value}h
+                        {tick.value}h
                       </div>
                     );
                   })}
@@ -1324,9 +1382,15 @@ export default function TimeDashboard({
                       return (
                         <div key={row.name} className="flex h-full min-w-[56px] flex-1 flex-col items-center justify-end gap-1">
                           <div
-                            className="w-full rounded-t-md bg-gradient-to-t from-[#0BA5E9] to-[#67D0F8]"
+                            className={`w-full rounded-t-md ${
+                              row.isRunning
+                                ? "bg-gradient-to-t from-emerald-500 to-emerald-300"
+                                : "bg-gradient-to-t from-[#0BA5E9] to-[#67D0F8]"
+                            }`}
                             style={{ height: `${heightPercent}%` }}
-                            title={`${row.name}: ${formatDuration(row.seconds)}`}
+                            title={`${row.name} • Total hours worked: ${formatDuration(row.seconds)}${
+                              row.isRunning ? " • Running now" : ""
+                            }`}
                           />
                           <p className="w-full truncate text-center text-[11px] font-semibold text-slate-700">{row.name}</p>
                         </div>
