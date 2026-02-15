@@ -22,6 +22,7 @@ type MemberWeekPayload = {
 
 type StoredStatRow = {
   member_name: string;
+  source_date: string;
   start_at: string;
   duration_seconds: number;
   project_key: string | null;
@@ -82,7 +83,7 @@ async function readStoredWeek(
   const memberFilter = `in.(${quotedMembers})`;
   const url =
     `${base}/rest/v1/time_entries` +
-    `?select=member_name,start_at,duration_seconds,project_key,synced_at` +
+    `?select=member_name,source_date,start_at,duration_seconds,project_key,synced_at` +
     `&member_name=${encodeURIComponent(memberFilter)}` +
     `&source_date=gte.${encodeURIComponent(startDate)}` +
     `&source_date=lte.${encodeURIComponent(endDate)}`;
@@ -122,7 +123,7 @@ async function readStoredWeek(
   for (const row of rows) {
     const projectType = row.project_key ? projectTypeByKey.get(row.project_key) ?? "work" : "work";
     if (projectType === "non_work") continue;
-    const statDate = row.start_at.slice(0, 10);
+    const statDate = row.source_date;
     const key = `${row.member_name}::${statDate}`;
     const existing = computedMap.get(key);
     if (existing) {

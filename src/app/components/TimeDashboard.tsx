@@ -90,6 +90,7 @@ const MIN_BLOCK_HEIGHT = 24;
 const DRAG_SNAP_MINUTES = 5;
 const RANKING_ENTRY_CAP_SECONDS = 4 * 60 * 60;
 const EXCLUDED_PROJECT_NAME = "non-work-task";
+const ALL_CALENDAR_MEMBER_HEADER_HEIGHT = 34;
 const MEMBER_LINK_CLASS =
   "font-semibold text-sky-700 underline decoration-sky-400 decoration-2 underline-offset-2 hover:text-sky-800";
 
@@ -155,6 +156,16 @@ function formatHourLabel(hour: number): string {
   if (hour < 12) return `${hour} AM`;
   if (hour === 12) return "12 PM";
   return `${hour - 12} PM`;
+}
+
+function getHourLabelPositionStyle(hour: number): CSSProperties {
+  if (hour <= 0) {
+    return { top: "0px" };
+  }
+  if (hour >= HOURS_IN_DAY) {
+    return { top: `${HOURS_IN_DAY * HOUR_HEIGHT}px`, transform: "translateY(-100%)" };
+  }
+  return { top: `${hour * HOUR_HEIGHT}px`, transform: "translateY(-50%)" };
 }
 
 type TimelineBlock = {
@@ -1583,7 +1594,7 @@ export default function TimeDashboard({
                         <div
                           key={hour}
                           className="absolute right-0 pr-2 text-[11px] font-medium text-slate-400"
-                          style={{ top: `${hour * HOUR_HEIGHT - 8}px` }}
+                          style={getHourLabelPositionStyle(hour)}
                         >
                           {formatHourLabel(hour)}
                         </div>
@@ -2037,16 +2048,19 @@ export default function TimeDashboard({
             <div className="mt-4">
             <div ref={allCalendarsScrollRef} className="max-h-[72vh] overflow-auto">
               <div className="grid min-w-[760px] grid-cols-[3.5rem_1fr] gap-2">
-                <div className="relative" style={{ height: `${HOURS_IN_DAY * HOUR_HEIGHT}px` }}>
-                  {Array.from({ length: HOURS_IN_DAY + 1 }).map((_, hour) => (
-                    <div
-                      key={hour}
-                      className="absolute right-0 pr-2 text-[11px] font-medium text-slate-400"
-                      style={{ top: `${hour * HOUR_HEIGHT - 8}px` }}
-                    >
-                      {formatHourLabel(hour)}
-                    </div>
-                  ))}
+                <div className="space-y-2">
+                  <div aria-hidden style={{ height: `${ALL_CALENDAR_MEMBER_HEADER_HEIGHT}px` }} />
+                  <div className="relative" style={{ height: `${HOURS_IN_DAY * HOUR_HEIGHT}px` }}>
+                    {Array.from({ length: HOURS_IN_DAY + 1 }).map((_, hour) => (
+                      <div
+                        key={hour}
+                        className="absolute right-0 pr-2 text-[11px] font-medium text-slate-400"
+                        style={getHourLabelPositionStyle(hour)}
+                      >
+                        {formatHourLabel(hour)}
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 <div
