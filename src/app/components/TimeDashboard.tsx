@@ -247,7 +247,6 @@ function buildTimelineBlocks(entries: TimeEntry[], dateInput: string) {
   const dayHeightPx = HOURS_IN_DAY * HOUR_HEIGHT;
   const sorted = [...entries].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
   const blocks: TimelineBlock[] = [];
-  let lastBottomPx = -Infinity;
 
   for (const entry of sorted) {
     const startMs = new Date(entry.start).getTime();
@@ -260,10 +259,8 @@ function buildTimelineBlocks(entries: TimeEntry[], dateInput: string) {
     const displayEnd = Math.min(end, Math.max(visibleEnd, visibleStart + minDurationMs));
     const idealTopPx = (visibleStart - start) * pxPerMs;
     const rawHeightPx = (displayEnd - visibleStart) * pxPerMs;
-    const unclampedTopPx = Math.max(idealTopPx, lastBottomPx + 2);
-    const topPx = Math.max(0, Math.min(dayHeightPx - MIN_BLOCK_HEIGHT, unclampedTopPx));
+    const topPx = Math.max(0, Math.min(dayHeightPx - MIN_BLOCK_HEIGHT, idealTopPx));
     const heightPx = Math.max(MIN_BLOCK_HEIGHT, Math.min(rawHeightPx, dayHeightPx - topPx));
-    lastBottomPx = topPx + heightPx;
 
     blocks.push({
       id: `${entry.id}-${startMs}`,
@@ -502,6 +499,7 @@ export default function TimeDashboard({
   const allCalendarsDatePickerRef = useRef<HTMLInputElement | null>(null);
   const modalProjectPickerRef = useRef<HTMLDivElement | null>(null);
   const suppressBlockClickUntilRef = useRef(0);
+  const autoScrolledKeyRef = useRef<string | null>(null);
 
   const hasMembers = members.length > 0;
   const isSelfOnly = Boolean(restrictToMember);
@@ -1192,6 +1190,9 @@ export default function TimeDashboard({
 
   useEffect(() => {
     if (nowLineOffsetPx == null) return;
+    const key = `${mode}:${date}`;
+    if (autoScrolledKeyRef.current === key) return;
+    autoScrolledKeyRef.current = key;
     const target = Math.max(0, nowLineOffsetPx - 220);
     if (mode === "member" && dayCalendarScrollRef.current) {
       dayCalendarScrollRef.current.scrollTop = target;
@@ -1199,7 +1200,7 @@ export default function TimeDashboard({
     if (mode === "all" && allCalendarsScrollRef.current) {
       allCalendarsScrollRef.current.scrollTop = target;
     }
-  }, [mode, date, nowLineOffsetPx, timeline.blocks.length, teamTimeline.length]);
+  }, [mode, date, nowLineOffsetPx]);
 
   useEffect(() => {
     if (!selectedEntry) return;
