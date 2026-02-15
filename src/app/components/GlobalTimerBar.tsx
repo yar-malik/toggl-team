@@ -86,6 +86,21 @@ function isZeroLikeTimerInput(input: string): boolean {
   return /^0+:0{1,2}(?::0{1,2})?$/.test(raw);
 }
 
+function buildOptimisticRunningTimer(input: {
+  elapsedSeconds: number;
+  description: string;
+  projectName: string;
+}): RunningTimer {
+  const elapsedSeconds = Math.max(0, Math.floor(input.elapsedSeconds));
+  return {
+    id: -Date.now(),
+    description: input.description.trim() || null,
+    projectName: input.projectName.trim() || null,
+    startAt: new Date(Date.now() - elapsedSeconds * 1000).toISOString(),
+    durationSeconds: elapsedSeconds,
+  };
+}
+
 export default function GlobalTimerBar({ memberName }: { memberName: string | null }) {
   const [current, setCurrent] = useState<RunningTimer | null>(null);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
@@ -325,6 +340,24 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
     try {
       const elapsedSeconds = Math.max(1, Math.round(durationMinutes * 60));
       if (current) {
+        const optimistic = buildOptimisticRunningTimer({
+          elapsedSeconds,
+          description,
+          projectName,
+        });
+        setCurrent(optimistic);
+        window.dispatchEvent(
+          new CustomEvent("voho-timer-changed", {
+            detail: {
+              memberName,
+              isRunning: true,
+              startAt: optimistic.startAt,
+              durationSeconds: optimistic.durationSeconds,
+              description: optimistic.description,
+              projectName: optimistic.projectName,
+            },
+          })
+        );
         const patchRes = await fetch("/api/time-entries/current", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -338,6 +371,7 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
         });
         const patchData = (await patchRes.json()) as { current?: RunningTimer | null; error?: string };
         if (!patchRes.ok || patchData.error || !patchData.current) {
+          setCurrent((prev) => prev ?? null);
           setTimerInputError(patchData.error || "Failed to update running timer");
           return;
         }
@@ -355,6 +389,24 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
           })
         );
       } else {
+        const optimistic = buildOptimisticRunningTimer({
+          elapsedSeconds,
+          description,
+          projectName,
+        });
+        setCurrent(optimistic);
+        window.dispatchEvent(
+          new CustomEvent("voho-timer-changed", {
+            detail: {
+              memberName,
+              isRunning: true,
+              startAt: optimistic.startAt,
+              durationSeconds: optimistic.durationSeconds,
+              description: optimistic.description,
+              projectName: optimistic.projectName,
+            },
+          })
+        );
         const res = await fetch("/api/time-entries/start", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -368,6 +420,19 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
         });
         const data = (await res.json()) as { current?: RunningTimer | null; error?: string };
         if (!res.ok || data.error || !data.current) {
+          setCurrent(null);
+          window.dispatchEvent(
+            new CustomEvent("voho-timer-changed", {
+              detail: {
+                memberName,
+                isRunning: false,
+                startAt: null,
+                durationSeconds: 0,
+                description: null,
+                projectName: null,
+              },
+            })
+          );
           setTimerInputError(data.error || "Failed to start timer");
           return;
         }
@@ -528,6 +593,26 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
             }
             setBusy(true);
             try {
+              const optimistic = buildOptimisticRunningTimer({
+                elapsedSeconds: 0,
+                description,
+                projectName,
+              });
+              setCurrent(optimistic);
+              setTimerInputDirty(false);
+              window.dispatchEvent(
+                new CustomEvent("voho-timer-changed", {
+                  detail: {
+                    memberName,
+                    isRunning: true,
+                    startAt: optimistic.startAt,
+                    durationSeconds: optimistic.durationSeconds,
+                    description: optimistic.description,
+                    projectName: optimistic.projectName,
+                  },
+                })
+              );
+
               const res = await fetch("/api/time-entries/start", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -541,7 +626,6 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
               const data = (await res.json()) as { current?: RunningTimer | null };
               if (res.ok && data.current) {
                 setCurrent(data.current);
-                setTimerInputDirty(false);
                 window.dispatchEvent(
                   new CustomEvent("voho-timer-changed", {
                     detail: {
@@ -551,6 +635,20 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
                       durationSeconds: data.current.durationSeconds,
                       description: description.trim() || null,
                       projectName: projectName.trim() || null,
+                    },
+                  })
+                );
+              } else {
+                setCurrent(null);
+                window.dispatchEvent(
+                  new CustomEvent("voho-timer-changed", {
+                    detail: {
+                      memberName,
+                      isRunning: false,
+                      startAt: null,
+                      durationSeconds: 0,
+                      description: null,
+                      projectName: null,
                     },
                   })
                 );
@@ -570,29 +668,47 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
           disabled={busy || !current}
           onClick={async () => {
             if (!memberName) return;
+            const previous = current;
+            const previousDescription = description;
+            const previousProjectName = projectName;
             setBusy(true);
+            setCurrent(null);
+            setDescription("");
+            setProjectName("");
+            setTimerInput("0:00:00");
+            setTimerInputDirty(false);
+            window.dispatchEvent(
+              new CustomEvent("voho-timer-changed", {
+                detail: {
+                  memberName,
+                  isRunning: false,
+                  startAt: null,
+                  durationSeconds: 0,
+                  description: null,
+                  projectName: null,
+                },
+              })
+            );
             try {
-              await persistRunningDraft(description, projectName);
+              await persistRunningDraft(previousDescription, previousProjectName);
               const res = await fetch("/api/time-entries/stop", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ member: memberName, tzOffset: new Date().getTimezoneOffset() }),
               });
-              if (res.ok) {
-                setCurrent(null);
-                setDescription("");
-                setProjectName("");
-                setTimerInput("0:00:00");
-                setTimerInputDirty(false);
+              if (!res.ok) {
+                setCurrent(previous);
+                setDescription(previousDescription);
+                setProjectName(previousProjectName);
                 window.dispatchEvent(
                   new CustomEvent("voho-timer-changed", {
                     detail: {
                       memberName,
-                      isRunning: false,
-                      startAt: null,
-                      durationSeconds: 0,
-                      description: null,
-                      projectName: null,
+                      isRunning: true,
+                      startAt: previous?.startAt ?? new Date().toISOString(),
+                      durationSeconds: previous?.durationSeconds ?? 0,
+                      description: previousDescription.trim() || null,
+                      projectName: previousProjectName.trim() || null,
                     },
                   })
                 );
