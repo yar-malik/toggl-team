@@ -5,12 +5,13 @@ import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import GlobalTimerBar from "@/app/components/GlobalTimerBar";
 import {
-  DEFAULT_POMODORO_SECONDS,
+  completePomodoro,
   formatPomodoroTimer,
-  incrementPomodoroForToday,
+  pausePomodoro,
   POMODORO_SYNC_EVENT,
   PomodoroState,
   readPomodoroState,
+  startPomodoro,
   writePomodoroState,
 } from "@/lib/pomodoroClient";
 
@@ -154,9 +155,11 @@ export default function PlatformShell({
   const [nowMs, setNowMs] = useState(0);
   const defaultTitleRef = useRef("Voho Track");
   const [pomodoroState, setPomodoroState] = useState<PomodoroState>({
-    secondsLeft: DEFAULT_POMODORO_SECONDS,
+    secondsLeft: 25 * 60,
     running: false,
     completionsByDay: {},
+    sessions: [],
+    activeSessionId: null,
     updatedAt: Date.now(),
   });
 
@@ -193,11 +196,7 @@ export default function PlatformShell({
       setPomodoroState((prev) => {
         let next: PomodoroState;
         if (prev.secondsLeft <= 1) {
-          next = incrementPomodoroForToday({
-            ...prev,
-            running: false,
-            secondsLeft: 0,
-          });
+          next = completePomodoro(prev);
         } else {
           next = { ...prev, secondsLeft: prev.secondsLeft - 1 };
         }
@@ -385,11 +384,7 @@ export default function PlatformShell({
                     onClick={(event) => {
                       event.stopPropagation();
                       setPomodoroState((prev) => {
-                        const next: PomodoroState = {
-                          ...prev,
-                          secondsLeft: prev.secondsLeft <= 0 ? DEFAULT_POMODORO_SECONDS : prev.secondsLeft,
-                          running: !prev.running,
-                        };
+                        const next = prev.running ? pausePomodoro(prev) : startPomodoro(prev);
                         writePomodoroState(next, "platform-shell");
                         return next;
                       });

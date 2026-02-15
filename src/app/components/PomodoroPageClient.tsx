@@ -2,12 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  DEFAULT_POMODORO_SECONDS,
+  completePomodoro,
   formatPomodoroTimer,
   getPomodoroDayKey,
+  pausePomodoro,
   POMODORO_SYNC_EVENT,
   PomodoroState,
   readPomodoroState,
+  resetPomodoro,
+  startPomodoro,
+  updatePomodoroSession,
   writePomodoroState,
 } from "@/lib/pomodoroClient";
 
@@ -19,9 +23,11 @@ function formatDay(dayKey: string) {
 
 export default function PomodoroPageClient() {
   const [pomodoroState, setPomodoroState] = useState<PomodoroState>({
-    secondsLeft: DEFAULT_POMODORO_SECONDS,
+    secondsLeft: 25 * 60,
     running: false,
     completionsByDay: {},
+    sessions: [],
+    activeSessionId: null,
     updatedAt: Date.now(),
   });
 
@@ -59,6 +65,10 @@ export default function PomodoroPageClient() {
   }, [pomodoroState.completionsByDay]);
 
   const weekTotal = useMemo(() => lastSevenDays.reduce((sum, item) => sum + item.count, 0), [lastSevenDays]);
+  const completedSessions = useMemo(
+    () => pomodoroState.sessions.filter((session) => session.durationSeconds > 0),
+    [pomodoroState.sessions]
+  );
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -74,11 +84,7 @@ export default function PomodoroPageClient() {
             type="button"
             onClick={() =>
               setPomodoroState((prev) => {
-                const next: PomodoroState = {
-                  ...prev,
-                  secondsLeft: prev.secondsLeft <= 0 ? DEFAULT_POMODORO_SECONDS : prev.secondsLeft,
-                  running: !prev.running,
-                };
+                const next = prev.running ? pausePomodoro(prev) : startPomodoro(prev);
                 writePomodoroState(next, "pomodoro-page");
                 return next;
               })
@@ -91,11 +97,20 @@ export default function PomodoroPageClient() {
             type="button"
             onClick={() =>
               setPomodoroState((prev) => {
-                const next: PomodoroState = {
-                  ...prev,
-                  running: false,
-                  secondsLeft: DEFAULT_POMODORO_SECONDS,
-                };
+                const next = completePomodoro(prev);
+                writePomodoroState(next, "pomodoro-page");
+                return next;
+              })
+            }
+            className="rounded-lg border border-sky-300 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 hover:bg-sky-100"
+          >
+            Complete now
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              setPomodoroState((prev) => {
+                const next = resetPomodoro(prev);
                 writePomodoroState(next, "pomodoro-page");
                 return next;
               })
@@ -131,6 +146,87 @@ export default function PomodoroPageClient() {
               <tr key={item.key} className="border-t border-slate-100">
                 <td className="px-4 py-2 font-medium text-slate-900">{formatDay(item.key)}</td>
                 <td className="px-4 py-2 text-slate-700">{item.count}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mt-5 overflow-hidden rounded-xl border border-slate-200">
+        <table className="min-w-full text-sm">
+          <thead className="bg-slate-50 text-left text-slate-600">
+            <tr>
+              <th className="px-4 py-2">Ended</th>
+              <th className="px-4 py-2">Focus</th>
+              <th className="px-4 py-2">What was done</th>
+              <th className="px-4 py-2">Interruptions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {completedSessions.length === 0 && (
+              <tr className="border-t border-slate-100">
+                <td colSpan={4} className="px-4 py-3 text-slate-500">
+                  No completed pomodoros yet.
+                </td>
+              </tr>
+            )}
+            {completedSessions.map((session) => (
+              <tr key={session.id} className="border-t border-slate-100">
+                <td className="px-4 py-2 text-slate-700">
+                  {new Date(session.endedAt).toLocaleString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </td>
+                <td className="px-4 py-2">
+                  <input
+                    type="text"
+                    value={session.focus}
+                    onChange={(event) =>
+                      setPomodoroState((prev) => {
+                        const next = updatePomodoroSession(prev, session.id, { focus: event.target.value });
+                        writePomodoroState(next, "pomodoro-page");
+                        return next;
+                      })
+                    }
+                    placeholder="Focus area"
+                    className="w-full rounded-md border border-slate-300 px-2 py-1 text-slate-800"
+                  />
+                </td>
+                <td className="px-4 py-2">
+                  <input
+                    type="text"
+                    value={session.done}
+                    onChange={(event) =>
+                      setPomodoroState((prev) => {
+                        const next = updatePomodoroSession(prev, session.id, { done: event.target.value });
+                        writePomodoroState(next, "pomodoro-page");
+                        return next;
+                      })
+                    }
+                    placeholder="What did you complete?"
+                    className="w-full rounded-md border border-slate-300 px-2 py-1 text-slate-800"
+                  />
+                </td>
+                <td className="px-4 py-2">
+                  <input
+                    type="number"
+                    min={0}
+                    value={session.interruptions}
+                    onChange={(event) =>
+                      setPomodoroState((prev) => {
+                        const next = updatePomodoroSession(prev, session.id, {
+                          interruptions: Number(event.target.value || 0),
+                        });
+                        writePomodoroState(next, "pomodoro-page");
+                        return next;
+                      })
+                    }
+                    className="w-20 rounded-md border border-slate-300 px-2 py-1 text-slate-800"
+                  />
+                </td>
               </tr>
             ))}
           </tbody>

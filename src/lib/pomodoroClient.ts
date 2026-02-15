@@ -9,7 +9,20 @@ export type PomodoroState = {
   secondsLeft: number;
   running: boolean;
   completionsByDay: Record<string, number>;
+  sessions: PomodoroSession[];
+  activeSessionId: string | null;
   updatedAt: number;
+};
+
+export type PomodoroSession = {
+  id: string;
+  dayKey: string;
+  startedAt: string;
+  endedAt: string;
+  durationSeconds: number;
+  interruptions: number;
+  focus: string;
+  done: string;
 };
 
 function clampSeconds(value: number) {
@@ -36,6 +49,8 @@ function emptyState(): PomodoroState {
     secondsLeft: DEFAULT_POMODORO_SECONDS,
     running: false,
     completionsByDay: {},
+    sessions: [],
+    activeSessionId: null,
     updatedAt: Date.now(),
   };
 }
@@ -48,10 +63,37 @@ function normalizeState(raw: unknown): PomodoroState {
     const safeCount = Number(count);
     if (Number.isFinite(safeCount) && safeCount > 0) cleanedCompletions[day] = Math.floor(safeCount);
   }
+  const rawSessions = Array.isArray((value as { sessions?: unknown[] }).sessions)
+    ? ((value as { sessions?: unknown[] }).sessions as unknown[])
+    : [];
+  const sessions: PomodoroSession[] = rawSessions
+    .map((row) => row as Partial<PomodoroSession>)
+    .filter((row) => typeof row.id === "string" && row.id.length > 0)
+    .map((row) => ({
+      id: row.id as string,
+      dayKey: typeof row.dayKey === "string" && row.dayKey ? row.dayKey : getPomodoroDayKey(),
+      startedAt: typeof row.startedAt === "string" ? row.startedAt : new Date().toISOString(),
+      endedAt: typeof row.endedAt === "string" ? row.endedAt : new Date().toISOString(),
+      durationSeconds: Math.max(0, Math.floor(Number(row.durationSeconds ?? DEFAULT_POMODORO_SECONDS))),
+      interruptions: Math.max(0, Math.floor(Number(row.interruptions ?? 0))),
+      focus: typeof row.focus === "string" ? row.focus : "",
+      done: typeof row.done === "string" ? row.done : "",
+    }))
+    .sort((a, b) => new Date(b.endedAt).getTime() - new Date(a.endedAt).getTime())
+    .slice(0, 500);
+
+  const activeSessionIdRaw = (value as { activeSessionId?: unknown }).activeSessionId;
+  const activeSessionId =
+    typeof activeSessionIdRaw === "string" && sessions.some((session) => session.id === activeSessionIdRaw)
+      ? activeSessionIdRaw
+      : null;
+
   return {
     secondsLeft: clampSeconds(Number(value.secondsLeft ?? DEFAULT_POMODORO_SECONDS)),
     running: Boolean(value.running),
     completionsByDay: cleanedCompletions,
+    sessions,
+    activeSessionId,
     updatedAt: Number(value.updatedAt ?? Date.now()),
   };
 }
@@ -93,6 +135,8 @@ export function readPomodoroState(): PomodoroState {
         secondsLeft,
         running: running && secondsLeft > 0,
         completionsByDay: {},
+        sessions: [],
+        activeSessionId: null,
         updatedAt: Date.now(),
       };
     }
@@ -129,3 +173,111 @@ export function incrementPomodoroForToday(state: PomodoroState, at = new Date())
   };
 }
 
+function ensureActiveSession(state: PomodoroState): PomodoroState {
+  if (state.activeSessionId && state.sessions.some((session) => session.id === state.activeSessionId)) return state;
+  const now = new Date();
+  const nextSession: PomodoroSession = {
+    id: `pomodoro-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
+    dayKey: getPomodoroDayKey(now),
+    startedAt: now.toISOString(),
+    endedAt: now.toISOString(),
+    durationSeconds: DEFAULT_POMODORO_SECONDS,
+    interruptions: 0,
+    focus: "",
+    done: "",
+  };
+  return {
+    ...state,
+    sessions: [nextSession, ...state.sessions].slice(0, 500),
+    activeSessionId: nextSession.id,
+  };
+}
+
+export function startPomodoro(state: PomodoroState): PomodoroState {
+  const base = ensureActiveSession(state);
+  return {
+    ...base,
+    secondsLeft: base.secondsLeft <= 0 ? DEFAULT_POMODORO_SECONDS : base.secondsLeft,
+    running: true,
+  };
+}
+
+export function pausePomodoro(state: PomodoroState): PomodoroState {
+  if (!state.running) return state;
+  let sessions = state.sessions;
+  if (state.activeSessionId) {
+    sessions = state.sessions.map((session) =>
+      session.id === state.activeSessionId
+        ? {
+            ...session,
+            interruptions: session.interruptions + 1,
+          }
+        : session
+    );
+  }
+  return {
+    ...state,
+    running: false,
+    sessions,
+  };
+}
+
+export function resetPomodoro(state: PomodoroState): PomodoroState {
+  return {
+    ...state,
+    running: false,
+    secondsLeft: DEFAULT_POMODORO_SECONDS,
+    activeSessionId: null,
+  };
+}
+
+export function completePomodoro(state: PomodoroState, at = new Date()): PomodoroState {
+  const base = ensureActiveSession(state);
+  const dayKey = getPomodoroDayKey(at);
+  const endedAt = at.toISOString();
+  const sessions = base.sessions.map((session) =>
+    session.id === base.activeSessionId
+      ? {
+          ...session,
+          dayKey,
+          endedAt,
+          durationSeconds: DEFAULT_POMODORO_SECONDS,
+        }
+      : session
+  );
+
+  return {
+    ...base,
+    running: false,
+    secondsLeft: 0,
+    sessions,
+    activeSessionId: null,
+    completionsByDay: {
+      ...base.completionsByDay,
+      [dayKey]: (base.completionsByDay[dayKey] ?? 0) + 1,
+    },
+  };
+}
+
+export function updatePomodoroSession(
+  state: PomodoroState,
+  sessionId: string,
+  patch: { focus?: string; done?: string; interruptions?: number }
+): PomodoroState {
+  return {
+    ...state,
+    sessions: state.sessions.map((session) =>
+      session.id === sessionId
+        ? {
+            ...session,
+            focus: patch.focus ?? session.focus,
+            done: patch.done ?? session.done,
+            interruptions:
+              typeof patch.interruptions === "number"
+                ? Math.max(0, Math.floor(patch.interruptions))
+                : session.interruptions,
+          }
+        : session
+    ),
+  };
+}
