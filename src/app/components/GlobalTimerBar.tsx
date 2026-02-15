@@ -101,6 +101,10 @@ function buildOptimisticRunningTimer(input: {
   };
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 export default function GlobalTimerBar({ memberName }: { memberName: string | null }) {
   const [current, setCurrent] = useState<RunningTimer | null>(null);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
@@ -665,9 +669,10 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
 
         <button
           type="button"
-          disabled={busy || !current}
+          disabled={!current}
           onClick={async () => {
             if (!memberName) return;
+            if (!current) return;
             const previous = current;
             const previousDescription = description;
             const previousProjectName = projectName;
@@ -691,12 +696,22 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
             );
             try {
               await persistRunningDraft(previousDescription, previousProjectName);
-              const res = await fetch("/api/time-entries/stop", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ member: memberName, tzOffset: new Date().getTimezoneOffset() }),
-              });
-              if (!res.ok) {
+              let stopped = false;
+              for (let attempt = 0; attempt < 4; attempt += 1) {
+                const res = await fetch("/api/time-entries/stop", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ member: memberName, tzOffset: new Date().getTimezoneOffset() }),
+                });
+                if (res.ok) {
+                  stopped = true;
+                  break;
+                }
+                if (res.status !== 409) break;
+                await sleep(150);
+              }
+
+              if (!stopped) {
                 setCurrent(previous);
                 setDescription(previousDescription);
                 setProjectName(previousProjectName);
