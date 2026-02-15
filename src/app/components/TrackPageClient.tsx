@@ -38,6 +38,10 @@ type WeekTotalResponse = {
 
 type ProjectItem = { key: string; name: string; color?: string | null };
 type ProjectsResponse = { projects: ProjectItem[]; error?: string };
+type TeamResponse = {
+  members: Array<{ name: string; totalSeconds: number }>;
+  error?: string;
+};
 
 type CalendarDraft = { hour: number; minute: number };
 type EntryEditorState = {
@@ -238,6 +242,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
   const [currentTimer, setCurrentTimer] = useState<CurrentTimerResponse["current"]>(null);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [weekTotalSeconds, setWeekTotalSeconds] = useState(0);
+  const [dailyRanking, setDailyRanking] = useState<Array<{ name: string; seconds: number }>>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(0);
@@ -454,14 +459,53 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
       }
     };
 
+    const loadDailyRanking = async () => {
+      try {
+        const teamData = await fetch(
+          `/api/team?date=${encodeURIComponent(date)}&tzOffset=${encodeURIComponent(
+            String(new Date().getTimezoneOffset())
+          )}&_req=${Date.now()}`,
+          { cache: "no-store" }
+        ).then(async (res) => {
+          const data = (await res.json()) as TeamResponse;
+          if (!res.ok || data.error) throw new Error(data.error || "Failed to load team ranking");
+          return data;
+        });
+        if (!active) return;
+        const rows = [...(teamData.members ?? [])]
+          .map((member) => ({
+            name: member.name,
+            seconds: Math.max(0, Number(member.totalSeconds ?? 0)),
+          }))
+          .sort((a, b) => {
+            if (b.seconds !== a.seconds) return b.seconds - a.seconds;
+            const aIsYar = a.name.trim().toLowerCase() === "yar";
+            const bIsYar = b.name.trim().toLowerCase() === "yar";
+            if (aIsYar && !bIsYar) return -1;
+            if (!aIsYar && bIsYar) return 1;
+            return a.name.localeCompare(b.name);
+          });
+        setDailyRanking(rows);
+      } catch {
+        if (!active) return;
+        setDailyRanking([]);
+      }
+    };
+
     void loadPrimary();
     void loadProjects();
     void loadWeekTotal();
+    void loadDailyRanking();
 
     return () => {
       active = false;
     };
   }, [memberName, date, refreshTick]);
+
+  const dailyRankingMaxHours = useMemo(() => {
+    const maxSeconds = dailyRanking.reduce((max, row) => Math.max(max, row.seconds), 0);
+    return Math.max(1, Math.ceil(maxSeconds / 3600));
+  }, [dailyRanking]);
 
   const weekDays = useMemo(() => buildWeekDays(date), [date]);
   const dayStartMs = useMemo(() => new Date(`${date}T00:00:00`).getTime(), [date]);
@@ -567,6 +611,58 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
         </div>
         {entries?.warning && <p className="mt-2 text-xs text-amber-700">{entries.warning}</p>}
         {error && <p className="mt-2 text-xs text-rose-700">{error}</p>}
+      </div>
+
+      <div className="border-b border-slate-200 bg-slate-50/40 px-5 py-4">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Daily ranking</p>
+          <p className="text-xs text-slate-500">{date}</p>
+        </div>
+        {dailyRanking.length === 0 ? (
+          <p className="text-sm text-slate-500">No ranking data yet.</p>
+        ) : (
+          <div className="grid grid-cols-[3.2rem_1fr] gap-2">
+            <div className="relative h-40">
+              {[0, 1, 2, 3, 4].map((step) => {
+                const value = Math.round((dailyRankingMaxHours * (4 - step)) * 10) / 10;
+                return (
+                  <div
+                    key={step}
+                    className="absolute right-0 text-[10px] font-medium text-slate-500"
+                    style={{ top: `${step * 25 - 6}%` }}
+                  >
+                    {value}h
+                  </div>
+                );
+              })}
+            </div>
+            <div className="relative h-40 rounded-lg border border-slate-200 bg-white px-2 pt-2">
+              {[0, 1, 2, 3, 4].map((step) => (
+                <div
+                  key={`daily-grid-${step}`}
+                  className="absolute left-0 right-0 border-t border-slate-200"
+                  style={{ top: `${step * 25}%` }}
+                />
+              ))}
+              <div className="relative z-10 flex h-full items-end gap-2">
+                {dailyRanking.map((row) => {
+                  const hours = row.seconds / 3600;
+                  const heightPercent = Math.max(6, (hours / dailyRankingMaxHours) * 100);
+                  return (
+                    <div key={row.name} className="flex min-w-[56px] flex-1 flex-col items-center gap-1">
+                      <div
+                        className="w-full rounded-t-md bg-gradient-to-t from-[#0BA5E9] to-[#67D0F8]"
+                        style={{ height: `${heightPercent}%` }}
+                        title={`${row.name}: ${formatDurationShort(row.seconds)}`}
+                      />
+                      <p className="w-full truncate text-center text-[11px] font-semibold text-slate-700">{row.name}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="min-h-[620px]">
