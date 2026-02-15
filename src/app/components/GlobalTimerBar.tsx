@@ -709,7 +709,12 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
                   stopped = true;
                   break;
                 }
-                if (res.status !== 409) break;
+                // 409 means "no running timer" which is effectively already stopped.
+                if (res.status === 409) {
+                  stopped = true;
+                  break;
+                }
+                if (res.status !== 404) break;
                 await sleep(150);
               }
 
@@ -729,6 +734,8 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
                     },
                   })
                 );
+              } else {
+                window.dispatchEvent(new CustomEvent("voho-entries-changed", { detail: { memberName } }));
               }
             } finally {
               setBusy(false);

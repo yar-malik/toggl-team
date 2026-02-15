@@ -691,38 +691,61 @@ export async function stopManualTimer(input: { memberName: string; tzOffsetMinut
     return { stopped: false, runningEntry: null as RunningEntry | null };
   }
 
-  const startedAtMs = new Date(running.startAt).getTime();
   const now = new Date();
   const nowIso = now.toISOString();
-  const durationSeconds = Number.isNaN(startedAtMs) ? 0 : Math.max(0, Math.floor((now.getTime() - startedAtMs) / 1000));
   const tzOffsetMinutes = parseTzOffsetMinutes(input.tzOffsetMinutes);
-  const sourceDate = toLocalDateKey(new Date(running.startAt), tzOffsetMinutes);
-
-  const response = await fetch(`${getBaseUrl()}/rest/v1/time_entries?toggl_entry_id=eq.${running.id}`, {
-    method: "PATCH",
-    headers: {
-      ...supabaseHeaders(),
-      Prefer: "return=representation",
-    },
-    body: JSON.stringify({
-      stop_at: nowIso,
-      duration_seconds: durationSeconds,
-      is_running: false,
-      source_date: sourceDate,
-      synced_at: nowIso,
-    }),
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    throw new Error("Failed to stop timer");
+  const rowsResponse = await fetch(
+    `${getBaseUrl()}/rest/v1/time_entries?select=toggl_entry_id,start_at&member_name=eq.${encodeURIComponent(
+      input.memberName
+    )}&is_running=eq.true&order=start_at.desc`,
+    {
+      method: "GET",
+      headers: supabaseHeaders(),
+      cache: "no-store",
+    }
+  );
+  if (!rowsResponse.ok) {
+    throw new Error("Failed to load running timer rows");
   }
+  const runningRows = (await rowsResponse.json()) as Array<{ toggl_entry_id: number; start_at: string }>;
+  if (runningRows.length === 0) {
+    return { stopped: false, runningEntry: null as RunningEntry | null };
+  }
+
+  for (const row of runningRows) {
+    const startedAtMs = new Date(row.start_at).getTime();
+    const durationSeconds = Number.isNaN(startedAtMs) ? 0 : Math.max(0, Math.floor((now.getTime() - startedAtMs) / 1000));
+    const sourceDate = toLocalDateKey(new Date(row.start_at), tzOffsetMinutes);
+    const response = await fetch(`${getBaseUrl()}/rest/v1/time_entries?toggl_entry_id=eq.${row.toggl_entry_id}`, {
+      method: "PATCH",
+      headers: {
+        ...supabaseHeaders(),
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        stop_at: nowIso,
+        duration_seconds: durationSeconds,
+        is_running: false,
+        source_date: sourceDate,
+        synced_at: nowIso,
+      }),
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      throw new Error("Failed to stop timer");
+    }
+  }
+
+  const runningStartedAtMs = new Date(running.startAt).getTime();
+  const runningDurationSeconds = Number.isNaN(runningStartedAtMs)
+    ? 0
+    : Math.max(0, Math.floor((now.getTime() - runningStartedAtMs) / 1000));
 
   return {
     stopped: true,
     stoppedEntry: {
       ...running,
-      durationSeconds,
+      durationSeconds: runningDurationSeconds,
     },
   };
 }
