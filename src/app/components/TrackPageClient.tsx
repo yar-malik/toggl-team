@@ -38,8 +38,11 @@ type WeekTotalResponse = {
 
 type ProjectItem = { key: string; name: string; color?: string | null };
 type ProjectsResponse = { projects: ProjectItem[]; error?: string };
-type TeamResponse = {
+type DailyRankingResponse = {
+  date: string;
   members: Array<{ name: string; totalSeconds: number }>;
+  source?: "db";
+  warning?: string | null;
   error?: string;
 };
 type MembersResponse = { members?: Array<{ name?: string; member_name?: string }>; error?: string };
@@ -58,7 +61,7 @@ type EntryEditorState = {
 const CALENDAR_HOUR_HEIGHT = 56;
 const MIN_ENTRY_MINUTES = 15;
 const DRAG_SNAP_MINUTES = 5;
-const ZOOM_LEVELS = [40, 48, 56, 68, 80] as const;
+const ZOOM_LEVELS = [48, 56, 68, 80, 96, 112] as const;
 
 function formatLocalDateInput(date: Date): string {
   const y = date.getFullYear();
@@ -251,7 +254,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
 
   const [modalProjectPickerOpen, setModalProjectPickerOpen] = useState(false);
   const [modalProjectSearch, setModalProjectSearch] = useState("");
-  const [zoomLevel, setZoomLevel] = useState(ZOOM_LEVELS.length - 1);
+  const [zoomLevel, setZoomLevel] = useState(ZOOM_LEVELS.length - 2);
   const [calendarDraft, setCalendarDraft] = useState<CalendarDraft | null>(null);
   const [draftDurationMinutes, setDraftDurationMinutes] = useState("60");
   const [entryEditor, setEntryEditor] = useState<EntryEditorState | null>(null);
@@ -462,7 +465,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
       }
     };
 
-    const loadDailyRanking = async () => {
+      const loadDailyRanking = async () => {
       const normalizeAndSort = (rows: Array<{ name: string; seconds: number }>) =>
         [...rows].sort((a, b) => {
           if (b.seconds !== a.seconds) return b.seconds - a.seconds;
@@ -489,28 +492,26 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
       };
 
       try {
-        const teamData = await fetch(
-          `/api/team?date=${encodeURIComponent(date)}&tzOffset=${encodeURIComponent(
-            String(new Date().getTimezoneOffset())
-          )}&_req=${Date.now()}`,
+        const rankingData = await fetch(
+          `/api/ranking/daily?date=${encodeURIComponent(date)}&_req=${Date.now()}`,
           { cache: "no-store" }
         ).then(async (res) => {
-          const data = (await res.json()) as TeamResponse;
-          if (!res.ok || data.error) throw new Error(data.error || "Failed to load team ranking");
+          const data = (await res.json()) as DailyRankingResponse;
+          if (!res.ok || data.error) throw new Error(data.error || "Failed to load daily ranking");
           return data;
         });
         if (!active) return;
-        const rows = (teamData.members ?? [])
+        const rows = (rankingData.members ?? [])
           .map((member) => ({
             name: member.name,
-            seconds: Math.max(0, Number(member.totalSeconds ?? 0)),
+            seconds: Math.max(0, Number(member.totalSeconds ?? (member as { seconds?: number }).seconds ?? 0)),
           }));
         if (rows.length === 0) {
           await loadMembersFallback("Team totals unavailable, showing members with 0h.");
           return;
         }
         setDailyRanking(normalizeAndSort(rows));
-        setDailyRankingWarning(null);
+        setDailyRankingWarning(rankingData.warning ?? null);
       } catch {
         try {
           await loadMembersFallback("Team totals unavailable, showing members with 0h.");
@@ -564,7 +565,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
   useEffect(() => {
     if (nowMarkerTop === null) return;
     if (!calendarScrollRef.current) return;
-    const target = Math.max(0, nowMarkerTop - 220);
+    const target = Math.max(0, nowMarkerTop - 320);
     calendarScrollRef.current.scrollTop = target;
   }, [nowMarkerTop, date, hourHeight, calendarBlocks.length]);
 

@@ -342,7 +342,8 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
     setTimerInput(formatTimerFixedHours(durationMinutes * 60));
     setBusy(true);
     try {
-      const elapsedSeconds = Math.max(1, Math.round(durationMinutes * 60));
+      const deltaSeconds = Math.max(1, Math.round(durationMinutes * 60));
+      const elapsedSeconds = current ? Math.max(1, runningSeconds + deltaSeconds) : deltaSeconds;
       if (current) {
         const optimistic = buildOptimisticRunningTimer({
           elapsedSeconds,
@@ -460,7 +461,7 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
     } finally {
       setBusy(false);
     }
-  }, [memberName, current, timerInput, description, projectName, persistRunningDraft]);
+  }, [memberName, current, timerInput, description, projectName, persistRunningDraft, runningSeconds]);
 
   if (!memberName) return null;
 
@@ -581,7 +582,7 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
 
         <button
           type="button"
-          disabled={busy || Boolean(current)}
+          disabled={busy}
           onClick={async () => {
             if (!memberName) return;
             const hasCustomDuration = !isZeroLikeTimerInput(timerInput);
@@ -595,6 +596,7 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
               setTimerInputDirty(false);
               return;
             }
+            if (current) return;
             setBusy(true);
             try {
               const optimistic = buildOptimisticRunningTimer({
