@@ -596,7 +596,75 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
               setTimerInputDirty(false);
               return;
             }
-            if (current) return;
+            if (current) {
+              const previous = current;
+              const previousDescription = description;
+              const previousProjectName = projectName;
+              setBusy(true);
+              setCurrent(null);
+              setDescription("");
+              setProjectName("");
+              setTimerInput("0:00:00");
+              setTimerInputDirty(false);
+              window.dispatchEvent(
+                new CustomEvent("voho-timer-changed", {
+                  detail: {
+                    memberName,
+                    isRunning: false,
+                    startAt: null,
+                    durationSeconds: 0,
+                    description: null,
+                    projectName: null,
+                  },
+                })
+              );
+              try {
+                await persistRunningDraft(previousDescription, previousProjectName);
+                let stopped = false;
+                for (let attempt = 0; attempt < 4; attempt += 1) {
+                  const res = await fetch("/api/time-entries/stop", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ member: memberName, tzOffset: new Date().getTimezoneOffset() }),
+                  });
+                  if (res.ok) {
+                    stopped = true;
+                    break;
+                  }
+                  // 409 means "no running timer" which is effectively already stopped.
+                  if (res.status === 409) {
+                    stopped = true;
+                    break;
+                  }
+                  if (res.status !== 404) break;
+                  await sleep(150);
+                }
+
+                if (!stopped) {
+                  setCurrent(previous);
+                  setDescription(previousDescription);
+                  setProjectName(previousProjectName);
+                  window.dispatchEvent(
+                    new CustomEvent("voho-timer-changed", {
+                      detail: {
+                        memberName,
+                        isRunning: true,
+                        startAt: previous?.startAt ?? new Date().toISOString(),
+                        durationSeconds: previous?.durationSeconds ?? 0,
+                        description: previousDescription.trim() || null,
+                        projectName: previousProjectName.trim() || null,
+                      },
+                    })
+                  );
+                } else {
+                  window.dispatchEvent(new CustomEvent("voho-entries-changed", { detail: { memberName } }));
+                }
+              } finally {
+                setBusy(false);
+              }
+              return;
+            }
+
             setBusy(true);
             try {
               const optimistic = buildOptimisticRunningTimer({
@@ -664,87 +732,9 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
             }
           }}
           className="h-12 w-12 rounded-full bg-[#0BA5E9] text-lg font-bold text-white shadow-sm transition hover:bg-[#0994cf] disabled:cursor-not-allowed disabled:bg-slate-300"
-          title="Start timer"
+          title={current ? "Stop timer" : "Start timer"}
         >
-          ▶
-        </button>
-
-        <button
-          type="button"
-          disabled={!current}
-          onClick={async () => {
-            if (!memberName) return;
-            if (!current) return;
-            const previous = current;
-            const previousDescription = description;
-            const previousProjectName = projectName;
-            setBusy(true);
-            setCurrent(null);
-            setDescription("");
-            setProjectName("");
-            setTimerInput("0:00:00");
-            setTimerInputDirty(false);
-            window.dispatchEvent(
-              new CustomEvent("voho-timer-changed", {
-                detail: {
-                  memberName,
-                  isRunning: false,
-                  startAt: null,
-                  durationSeconds: 0,
-                  description: null,
-                  projectName: null,
-                },
-              })
-            );
-            try {
-              await persistRunningDraft(previousDescription, previousProjectName);
-              let stopped = false;
-              for (let attempt = 0; attempt < 4; attempt += 1) {
-                const res = await fetch("/api/time-entries/stop", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ member: memberName, tzOffset: new Date().getTimezoneOffset() }),
-                });
-                if (res.ok) {
-                  stopped = true;
-                  break;
-                }
-                // 409 means "no running timer" which is effectively already stopped.
-                if (res.status === 409) {
-                  stopped = true;
-                  break;
-                }
-                if (res.status !== 404) break;
-                await sleep(150);
-              }
-
-              if (!stopped) {
-                setCurrent(previous);
-                setDescription(previousDescription);
-                setProjectName(previousProjectName);
-                window.dispatchEvent(
-                  new CustomEvent("voho-timer-changed", {
-                    detail: {
-                      memberName,
-                      isRunning: true,
-                      startAt: previous?.startAt ?? new Date().toISOString(),
-                      durationSeconds: previous?.durationSeconds ?? 0,
-                      description: previousDescription.trim() || null,
-                      projectName: previousProjectName.trim() || null,
-                    },
-                  })
-                );
-              } else {
-                window.dispatchEvent(new CustomEvent("voho-entries-changed", { detail: { memberName } }));
-              }
-            } finally {
-              setBusy(false);
-            }
-          }}
-          className="h-12 w-12 rounded-full bg-[#0BA5E9] text-lg font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
-          title="Stop timer"
-        >
-          ■
+          {current ? "■" : "▶"}
         </button>
       </div>
     </div>
