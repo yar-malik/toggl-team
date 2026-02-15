@@ -857,7 +857,7 @@ export default function TimeDashboard({
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       setRelativeNowMs(Date.now());
-    }, 30 * 1000);
+    }, 1000);
     return () => window.clearInterval(intervalId);
   }, []);
 
@@ -1002,7 +1002,7 @@ export default function TimeDashboard({
   const nowLineOffsetPx = useMemo(() => {
     const [yearStr, monthStr, dayStr] = date.split("-");
     const selected = new Date(Number(yearStr), Number(monthStr) - 1, Number(dayStr));
-    const today = new Date();
+    const today = new Date(relativeNowMs);
     if (
       selected.getFullYear() !== today.getFullYear() ||
       selected.getMonth() !== today.getMonth() ||
@@ -1010,9 +1010,9 @@ export default function TimeDashboard({
     ) {
       return null;
     }
-    const minutesIntoDay = today.getHours() * 60 + today.getMinutes();
+    const minutesIntoDay = today.getHours() * 60 + today.getMinutes() + today.getSeconds() / 60;
     return (minutesIntoDay / 60) * HOUR_HEIGHT;
-  }, [date]);
+  }, [date, relativeNowMs]);
 
   const openEntryModal = (entry: TimeEntry, memberName: string) => {
     setSelectedEntry({
