@@ -607,17 +607,6 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
           disabled={busy}
           onClick={async () => {
             if (!memberName) return;
-            const hasCustomDuration = !isZeroLikeTimerInput(timerInput);
-            if (hasCustomDuration) {
-              const parsedMinutes = parseDurationMinutes(timerInput);
-              if (!parsedMinutes) {
-                setTimerInputError("Use a format like 25 min or 1 hour");
-                return;
-              }
-              await createDurationEntry();
-              setTimerInputDirty(false);
-              return;
-            }
             if (current) {
               const previous = current;
               const previousDescription = description;
@@ -684,6 +673,18 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
               } finally {
                 setBusy(false);
               }
+              return;
+            }
+
+            const hasCustomDuration = !isZeroLikeTimerInput(timerInput);
+            if (hasCustomDuration) {
+              const parsedMinutes = parseDurationMinutes(timerInput);
+              if (!parsedMinutes) {
+                setTimerInputError("Use a format like 25 min or 1 hour");
+                return;
+              }
+              await createDurationEntry();
+              setTimerInputDirty(false);
               return;
             }
 

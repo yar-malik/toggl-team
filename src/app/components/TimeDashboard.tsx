@@ -955,33 +955,26 @@ export default function TimeDashboard({
   }, [teamData]);
 
   const dailyRankingSeries = useMemo(() => {
-    const totals = new Map<string, number>();
-    for (const memberData of teamData?.members ?? []) {
-      const key = memberData.name.trim().toLowerCase();
-      const cardEntries = memberData.entries.filter((entry) => !isExcludedFromRanking(entry.project_name));
-      const cardTotalSeconds = cardEntries.reduce((sum, entry) => sum + getEntrySeconds(entry), 0);
-      totals.set(key, cardTotalSeconds);
-    }
-
-    const sourceNames =
-      members.length > 0 ? members.map((item) => item.name) : (teamData?.members ?? []).map((item) => item.name);
-    const rows = sourceNames
-      .map((name) => name.trim())
-      .filter((name) => name.length > 0)
-      .map((name) => ({
-        name,
-        seconds: totals.get(name.toLowerCase()) ?? 0,
-      }));
-
-    return rows.sort((a, b) => {
-      if (b.seconds !== a.seconds) return b.seconds - a.seconds;
-      const aIsYar = a.name.trim().toLowerCase() === "yar";
-      const bIsYar = b.name.trim().toLowerCase() === "yar";
-      if (aIsYar && !bIsYar) return -1;
-      if (!aIsYar && bIsYar) return 1;
-      return a.name.localeCompare(b.name);
-    });
-  }, [teamData, members, relativeNowMs]);
+    if (!teamData) return [] as Array<{ name: string; seconds: number }>;
+    const allowed = new Set(selectedMembers.map((item) => item.trim().toLowerCase()));
+    return teamData.members
+      .filter((memberData) => {
+        if (allowed.size === 0) return true;
+        return allowed.has(memberData.name.trim().toLowerCase());
+      })
+      .map((memberData) => {
+        const cardEntries = memberData.entries.filter((entry) => !isExcludedFromRanking(entry.project_name));
+        const cardTotalSeconds = cardEntries.reduce((sum, entry) => sum + getEntrySeconds(entry), 0);
+        return {
+          name: memberData.name,
+          seconds: cardTotalSeconds,
+        };
+      })
+      .sort((a, b) => {
+        if (b.seconds !== a.seconds) return b.seconds - a.seconds;
+        return a.name.localeCompare(b.name);
+      });
+  }, [teamData, selectedMembers]);
 
   const dailyRankingMaxHours = useMemo(() => {
     const maxSeconds = dailyRankingSeries.reduce((max, row) => Math.max(max, row.seconds), 0);
