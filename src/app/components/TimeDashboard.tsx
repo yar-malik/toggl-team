@@ -114,7 +114,10 @@ function formatTime(iso: string | null): string {
 }
 
 function formatDateInput(date: Date): string {
-  return date.toISOString().slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function getEntrySeconds(entry: TimeEntry): number {
@@ -1057,11 +1060,28 @@ export default function TimeDashboard({
     if (Number.isNaN(parsed.getTime())) return date;
     return parsed.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
   }, [date]);
+  const selectedDayDate = useMemo(() => {
+    const parsed = new Date(`${date}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed;
+  }, [date]);
+  const selectedDayNumber = selectedDayDate ? String(selectedDayDate.getDate()) : "--";
+  const selectedDayWeekday = selectedDayDate
+    ? selectedDayDate.toLocaleDateString([], { weekday: "long" }).toUpperCase()
+    : "DAY";
 
   const liveClockLabel = useMemo(
     () => new Date(relativeNowMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
     [relativeNowMs]
   );
+  const allModeWeekTotalSeconds = useMemo(() => {
+    if (!teamWeekData) return 0;
+    const allowed = new Set(selectedMembers.map((name) => name.trim().toLowerCase()));
+    return teamWeekData.members.reduce((sum, row) => {
+      if (!allowed.has(row.name.trim().toLowerCase())) return sum;
+      return sum + row.totalSeconds;
+    }, 0);
+  }, [teamWeekData, selectedMembers]);
 
   const openEntryModal = (entry: TimeEntry, memberName: string) => {
     setSelectedEntry({
@@ -1771,9 +1791,6 @@ export default function TimeDashboard({
 
           {mode === "all" && (
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">
-              One shared daily timeline for everyone. Matching vertical positions indicate overlap.
-            </p>
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-2">
               <div className="relative w-full max-w-xs" ref={memberPickerRef}>
@@ -1856,6 +1873,16 @@ export default function TimeDashboard({
                 aria-hidden="true"
               />
               </div>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold text-slate-700">
+                  Week total <span className="text-slate-900">{formatDuration(allModeWeekTotalSeconds)}</span>
+                </p>
+                <button
+                  type="button"
+                  className="rounded-xl border border-transparent bg-transparent px-2 py-1.5 text-sm font-semibold text-slate-700 hover:border-slate-300 hover:bg-white"
+                >
+                  Day view ▾
+                </button>
               <div className="inline-flex rounded-xl border border-slate-300 bg-white p-0.5">
                 <button
                   type="button"
@@ -1885,12 +1912,21 @@ export default function TimeDashboard({
                   Timesheet
                 </button>
               </div>
+              </div>
             </div>
             <div className="mt-3 grid grid-cols-[3.5rem_1fr] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
               <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Activity</div>
               <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-fuchsia-100 text-2xl font-semibold text-fuchsia-500">
+                    {selectedDayNumber}
+                  </span>
+                  <div>
+                    <p className="text-sm font-semibold text-fuchsia-500">{selectedDayWeekday}</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">{liveClockLabel}</p>
+                  </div>
+                </div>
                 <p className="text-sm font-semibold text-slate-700">{selectedDayHeadline}</p>
-                <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">{liveClockLabel}</p>
               </div>
             </div>
             {allCalendarView === "calendar" && (
