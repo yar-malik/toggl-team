@@ -257,6 +257,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
   const [entryEditor, setEntryEditor] = useState<EntryEditorState | null>(null);
   const [blockDrag, setBlockDrag] = useState<BlockDragState | null>(null);
   const modalProjectPickerRef = useRef<HTMLDivElement | null>(null);
+  const calendarScrollRef = useRef<HTMLDivElement | null>(null);
   const hourHeight = ZOOM_LEVELS[zoomLevel];
 
   useEffect(() => {
@@ -560,6 +561,13 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
     return (minutes / 60) * hourHeight;
   }, [date, hourHeight, nowMs]);
 
+  useEffect(() => {
+    if (nowMarkerTop === null) return;
+    if (!calendarScrollRef.current) return;
+    const target = Math.max(0, nowMarkerTop - 220);
+    calendarScrollRef.current.scrollTop = target;
+  }, [nowMarkerTop, date, hourHeight, calendarBlocks.length]);
+
   const hours = useMemo(() => Array.from({ length: 24 }, (_, hour) => hour), []);
   const filteredModalProjects = useMemo(() => {
     const query = modalProjectSearch.trim().toLowerCase();
@@ -758,7 +766,7 @@ export default function TrackPageClient({ memberName }: { memberName: string }) 
             </div>
           )}
 
-          <div className="relative overflow-x-auto">
+          <div ref={calendarScrollRef} className="relative max-h-[72vh] overflow-auto">
             <div className="relative min-w-[820px]" style={{ height: `${24 * hourHeight}px` }}>
               <div className="absolute left-2 top-2 z-30 flex items-center gap-1 rounded-lg border border-slate-200 bg-white/95 p-1 shadow-sm">
                 <button

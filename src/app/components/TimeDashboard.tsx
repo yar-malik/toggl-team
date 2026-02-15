@@ -81,8 +81,8 @@ type SavedFilter = {
   date: string;
 };
 
-const FILTERS_KEY = "toggl-team-filters";
-const LAST_KEY = "toggl-team-last";
+const FILTERS_KEY = "voho-team-filters";
+const LAST_KEY = "voho-team-last";
 const HOURS_IN_DAY = 24;
 const HOUR_HEIGHT = 72;
 const MIN_BLOCK_HEIGHT = 24;
