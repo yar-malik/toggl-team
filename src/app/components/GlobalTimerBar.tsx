@@ -101,10 +101,6 @@ function buildOptimisticRunningTimer(input: {
   };
 }
 
-function sleep(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
 function setFaviconFromTimerState(isRunning: boolean) {
   const href = isRunning ? "/favicon-running-v2.svg" : "/favicon-idle-v2.svg";
   const withVersion = `${href}?state=${isRunning ? "running" : "idle"}&v=20260216`;
@@ -612,6 +608,7 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
               const previousDescription = description;
               const previousProjectName = projectName;
               setBusy(true);
+              setTimerInputError(null);
               setCurrent(null);
               setDescription("");
               setProjectName("");
@@ -629,32 +626,28 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
                   },
                 })
               );
+              window.dispatchEvent(new CustomEvent("voho-entries-changed", { detail: { memberName } }));
               try {
-                await persistRunningDraft(previousDescription, previousProjectName);
-                let stopped = false;
-                for (let attempt = 0; attempt < 4; attempt += 1) {
-                  const res = await fetch("/api/time-entries/stop", {
+                const tryStop = async () =>
+                  fetch("/api/time-entries/stop", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ member: memberName, tzOffset: new Date().getTimezoneOffset() }),
                   });
-                  if (res.ok) {
-                    stopped = true;
-                    break;
-                  }
-                  // 409 means "no running timer" which is effectively already stopped.
-                  if (res.status === 409) {
-                    stopped = true;
-                    break;
-                  }
-                  if (res.status !== 404) break;
-                  await sleep(150);
+
+                let res = await tryStop();
+                // One fast retry for transient race conditions.
+                if (!res.ok && res.status !== 409) {
+                  await new Promise((resolve) => window.setTimeout(resolve, 180));
+                  res = await tryStop();
                 }
+                const stopped = res.ok || res.status === 409;
 
                 if (!stopped) {
                   setCurrent(previous);
                   setDescription(previousDescription);
                   setProjectName(previousProjectName);
+                  setTimerInputError("Failed to stop timer. Please click stop again.");
                   window.dispatchEvent(
                     new CustomEvent("voho-timer-changed", {
                       detail: {
@@ -689,6 +682,7 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
             }
 
             setBusy(true);
+            setTimerInputError(null);
             try {
               const optimistic = buildOptimisticRunningTimer({
                 elapsedSeconds: 0,
@@ -709,6 +703,7 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
                   },
                 })
               );
+              window.dispatchEvent(new CustomEvent("voho-entries-changed", { detail: { memberName } }));
 
               const res = await fetch("/api/time-entries/start", {
                 method: "POST",
@@ -735,8 +730,10 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
                     },
                   })
                 );
+                window.dispatchEvent(new CustomEvent("voho-entries-changed", { detail: { memberName } }));
               } else {
                 setCurrent(null);
+                setTimerInputError("Failed to start timer. Please click start again.");
                 window.dispatchEvent(
                   new CustomEvent("voho-timer-changed", {
                     detail: {
