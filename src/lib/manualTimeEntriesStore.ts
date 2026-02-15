@@ -37,8 +37,8 @@ export type StoredProject = {
   workspace_id: number;
   project_id: number;
   project_name: string;
-  project_color: string;
-  project_type: "work" | "non_work";
+  project_color?: string;
+  project_type?: "work" | "non_work";
   total_seconds?: number;
   entry_count?: number;
 };
@@ -134,7 +134,7 @@ async function ensureManualProject(projectName: string | null): Promise<EnsurePr
     },
   ];
 
-  const response = await fetch(`${getBaseUrl()}/rest/v1/projects?on_conflict=project_key`, {
+  let response = await fetch(`${getBaseUrl()}/rest/v1/projects?on_conflict=project_key`, {
     method: "POST",
     headers: {
       ...supabaseHeaders(),
@@ -144,6 +144,29 @@ async function ensureManualProject(projectName: string | null): Promise<EnsurePr
     cache: "no-store",
   });
   if (!response.ok) {
+    // Backward compatibility if project_type column is not yet migrated.
+    const legacyPayload = [
+      {
+        project_key: projectKey,
+        workspace_id: workspaceId,
+        project_id: projectId,
+        project_name: normalized,
+        project_color: DEFAULT_PROJECT_COLOR,
+        created_at: nowIso,
+        updated_at: nowIso,
+      },
+    ];
+    response = await fetch(`${getBaseUrl()}/rest/v1/projects?on_conflict=project_key`, {
+      method: "POST",
+      headers: {
+        ...supabaseHeaders(),
+        Prefer: "resolution=merge-duplicates,return=minimal",
+      },
+      body: JSON.stringify(legacyPayload),
+      cache: "no-store",
+    });
+  }
+  if (!response.ok) {
     throw new Error("Failed to save project");
   }
   return { projectKey, projectName: normalized };
@@ -151,15 +174,12 @@ async function ensureManualProject(projectName: string | null): Promise<EnsurePr
 
 export async function listProjects(): Promise<StoredProject[]> {
   if (!isSupabaseConfigured()) return [];
-  const [projectsResponse, aliasesResponse, rollupsResponse] = await Promise.all([
-    fetch(
-      `${getBaseUrl()}/rest/v1/projects?select=project_key,workspace_id,project_id,project_name,project_color,project_type&order=project_name.asc`,
-      {
-        method: "GET",
-        headers: supabaseHeaders(),
-        cache: "no-store",
-      }
-    ),
+  const [projectsResponseWithType, aliasesResponse, rollupsResponse] = await Promise.all([
+    fetch(`${getBaseUrl()}/rest/v1/projects?select=project_key,workspace_id,project_id,project_name,project_color,project_type&order=project_name.asc`, {
+      method: "GET",
+      headers: supabaseHeaders(),
+      cache: "no-store",
+    }),
     fetch(`${getBaseUrl()}/rest/v1/project_aliases?select=source_project_key,canonical_project_key`, {
       method: "GET",
       headers: supabaseHeaders(),
@@ -171,6 +191,17 @@ export async function listProjects(): Promise<StoredProject[]> {
       cache: "no-store",
     }).catch(() => null),
   ]);
+
+  const projectsResponse = projectsResponseWithType.ok
+    ? projectsResponseWithType
+    : await fetch(
+        `${getBaseUrl()}/rest/v1/projects?select=project_key,workspace_id,project_id,project_name,project_color&order=project_name.asc`,
+        {
+          method: "GET",
+          headers: supabaseHeaders(),
+          cache: "no-store",
+        }
+      );
 
   if (!projectsResponse.ok) return [];
   const rows = (await projectsResponse.json()) as StoredProject[];
@@ -316,7 +347,7 @@ export async function updateProject(input: {
     throw new Error("Nothing to update");
   }
 
-  const response = await fetch(`${getBaseUrl()}/rest/v1/projects?project_key=eq.${encodeURIComponent(key)}`, {
+  let response = await fetch(`${getBaseUrl()}/rest/v1/projects?project_key=eq.${encodeURIComponent(key)}`, {
     method: "PATCH",
     headers: {
       ...supabaseHeaders(),
@@ -325,6 +356,22 @@ export async function updateProject(input: {
     body: JSON.stringify(patch),
     cache: "no-store",
   });
+  if (!response.ok && Object.prototype.hasOwnProperty.call(patch, "project_type")) {
+    // Backward compatibility if project_type column is not yet migrated.
+    const legacyPatch = { ...patch };
+    delete legacyPatch.project_type;
+    if (Object.keys(legacyPatch).length > 0) {
+      response = await fetch(`${getBaseUrl()}/rest/v1/projects?project_key=eq.${encodeURIComponent(key)}`, {
+        method: "PATCH",
+        headers: {
+          ...supabaseHeaders(),
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify(legacyPatch),
+        cache: "no-store",
+      });
+    }
+  }
   if (!response.ok) throw new Error("Failed to update project");
   const rows = (await response.json()) as Array<{
     project_key: string;
