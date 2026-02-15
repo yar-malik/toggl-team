@@ -948,10 +948,9 @@ export default function TimeDashboard({
     const totals = new Map<string, number>();
     for (const memberData of teamData?.members ?? []) {
       const key = memberData.name.trim().toLowerCase();
-      // Derive from actual entries to keep ranking aligned with what is visible in calendars.
-      const secondsFromEntries = memberData.entries.reduce((sum, entry) => sum + getEntrySeconds(entry), 0);
-      const fallback = Math.max(0, Number(memberData.totalSeconds ?? 0));
-      totals.set(key, Math.max(secondsFromEntries, fallback));
+      const cardEntries = memberData.entries.filter((entry) => !isExcludedFromRanking(entry.project_name));
+      const cardTotalSeconds = cardEntries.reduce((sum, entry) => sum + getEntrySeconds(entry), 0);
+      totals.set(key, cardTotalSeconds);
     }
 
     const sourceNames =
