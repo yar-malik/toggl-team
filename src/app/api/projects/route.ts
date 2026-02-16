@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createProject, listProjects, updateProject } from "@/lib/manualTimeEntriesStore";
+import { createProject, deleteProject, listProjects, updateProject } from "@/lib/manualTimeEntriesStore";
 import { requireSignedInOrThrow } from "@/lib/authorization";
 import { assignUniquePastelColors, DEFAULT_PROJECT_COLOR } from "@/lib/projectColors";
 
@@ -17,11 +17,17 @@ type UpdateProjectBody = {
   name?: string;
   color?: string;
   projectType?: "work" | "non_work";
+  archived?: boolean;
 };
 
-export async function GET() {
+type DeleteProjectBody = {
+  key?: string;
+};
+
+export async function GET(request: NextRequest) {
   try {
-    const projects = await listProjects();
+    const includeArchived = request.nextUrl.searchParams.get("includeArchived") === "1";
+    const projects = await listProjects({ includeArchived });
     const colorByKey = assignUniquePastelColors(
       projects.map((project) => ({
         key: project.project_key,
@@ -36,6 +42,7 @@ export async function GET() {
         name: project.project_name,
         color: colorByKey.get(project.project_key) || project.project_color || DEFAULT_PROJECT_COLOR,
         projectType: project.project_type ?? "work",
+        archived: project.project_archived === true,
         totalSeconds: project.total_seconds ?? 0,
         entryCount: project.entry_count ?? 0,
       })),
@@ -71,6 +78,7 @@ export async function POST(request: NextRequest) {
         name: project.projectName,
         color: project.projectColor,
         projectType: project.projectType,
+        archived: false,
       },
       source: "db",
     });
@@ -101,6 +109,7 @@ export async function PATCH(request: NextRequest) {
       name: body.name ?? null,
       color: body.color ?? null,
       projectType: body.projectType ?? null,
+      archived: typeof body.archived === "boolean" ? body.archived : null,
     });
     return NextResponse.json({
       ok: true,
@@ -109,11 +118,36 @@ export async function PATCH(request: NextRequest) {
         name: updated.projectName,
         color: updated.projectColor,
         projectType: updated.projectType,
+        archived: updated.projectArchived,
       },
       source: "db",
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to update project";
+    const status = message === "Unauthorized" ? 401 : 500;
+    return NextResponse.json({ error: message }, { status });
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  let body: DeleteProjectBody;
+  try {
+    body = (await request.json()) as DeleteProjectBody;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const key = body.key?.trim() ?? "";
+  if (!key) {
+    return NextResponse.json({ error: "Project key is required" }, { status: 400 });
+  }
+
+  try {
+    await requireSignedInOrThrow();
+    await deleteProject(key);
+    return NextResponse.json({ ok: true, key, source: "db" });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to delete project";
     const status = message === "Unauthorized" ? 401 : 500;
     return NextResponse.json({ error: message }, { status });
   }

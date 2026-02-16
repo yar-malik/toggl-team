@@ -11,6 +11,7 @@ export default async function ProjectsPage() {
         name: p.project_name,
         color: p.project_color || DEFAULT_PROJECT_COLOR,
         projectType: p.project_type ?? "work",
+        archived: p.project_archived === true,
         totalSeconds: p.total_seconds ?? 0,
         entryCount: p.entry_count ?? 0,
       }))}

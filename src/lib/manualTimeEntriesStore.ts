@@ -46,6 +46,7 @@ export type StoredProject = {
   project_name: string;
   project_color?: string;
   project_type?: "work" | "non_work";
+  project_archived?: boolean;
   total_seconds?: number;
   entry_count?: number;
 };
@@ -195,19 +196,24 @@ async function ensureManualProject(projectName: string | null): Promise<EnsurePr
   return { projectKey, projectName: normalized };
 }
 
-export async function listProjects(): Promise<StoredProject[]> {
+export async function listProjects(options?: { includeArchived?: boolean }): Promise<StoredProject[]> {
   if (!isSupabaseConfigured()) return [];
+  const includeArchived = options?.includeArchived === true;
+  const archivedFilter = includeArchived ? "" : "&project_archived=is.false";
   const [projectsResponseWithType, aliasesResponse, rollupsResponse] = await Promise.all([
-    fetch(`${getBaseUrl()}/rest/v1/projects?select=project_key,workspace_id,project_id,project_name,project_color,project_type&order=project_name.asc`, {
-      method: "GET",
-      headers: supabaseHeaders(),
-      cache: "no-store",
-    }),
+    fetch(
+      `${getBaseUrl()}/rest/v1/projects?select=project_key,workspace_id,project_id,project_name,project_color,project_type,project_archived${archivedFilter}&order=project_name.asc`,
+      {
+        method: "GET",
+        headers: supabaseHeaders(),
+        cache: "no-store",
+      }
+    ),
     fetch(`${getBaseUrl()}/rest/v1/project_aliases?select=source_project_key,canonical_project_key`, {
       method: "GET",
       headers: supabaseHeaders(),
       cache: "no-store",
-    }).catch(() => null),
+    }),
     fetch(`${getBaseUrl()}/rest/v1/project_rollups?select=project_key,total_seconds,entry_count`, {
       method: "GET",
       headers: supabaseHeaders(),
@@ -215,10 +221,21 @@ export async function listProjects(): Promise<StoredProject[]> {
     }).catch(() => null),
   ]);
 
-  const projectsResponse = projectsResponseWithType.ok
+  const projectsResponseWithArchivedFallback = projectsResponseWithType.ok
     ? projectsResponseWithType
     : await fetch(
-        `${getBaseUrl()}/rest/v1/projects?select=project_key,workspace_id,project_id,project_name,project_color&order=project_name.asc`,
+        `${getBaseUrl()}/rest/v1/projects?select=project_key,workspace_id,project_id,project_name,project_color,project_type${archivedFilter}&order=project_name.asc`,
+        {
+          method: "GET",
+          headers: supabaseHeaders(),
+          cache: "no-store",
+        }
+      );
+
+  const projectsResponse = projectsResponseWithArchivedFallback.ok
+    ? projectsResponseWithArchivedFallback
+    : await fetch(
+        `${getBaseUrl()}/rest/v1/projects?select=project_key,workspace_id,project_id,project_name,project_color${archivedFilter}&order=project_name.asc`,
         {
           method: "GET",
           headers: supabaseHeaders(),
@@ -259,18 +276,19 @@ export async function listProjects(): Promise<StoredProject[]> {
   const canonical = new Map<string, StoredProject>();
   for (const row of rows) {
     const canonicalKey = aliasMap.get(row.project_key) ?? row.project_key;
-      const canonicalRow = projectByKey.get(canonicalKey) ?? row;
-      if (!canonical.has(canonicalKey)) {
-        const rollup = rollupMap.get(canonicalKey);
-        canonical.set(canonicalKey, {
-          ...canonicalRow,
-          project_color: canonicalRow.project_color || DEFAULT_PROJECT_COLOR,
-          project_type: canonicalRow.project_type === "non_work" ? "non_work" : "work",
-          total_seconds: rollup?.totalSeconds ?? 0,
-          entry_count: rollup?.entryCount ?? 0,
-        });
-      }
+    const canonicalRow = projectByKey.get(canonicalKey) ?? row;
+    if (!canonical.has(canonicalKey)) {
+      const rollup = rollupMap.get(canonicalKey);
+      canonical.set(canonicalKey, {
+        ...canonicalRow,
+        project_color: canonicalRow.project_color || DEFAULT_PROJECT_COLOR,
+        project_type: canonicalRow.project_type === "non_work" ? "non_work" : "work",
+        project_archived: canonicalRow.project_archived === true,
+        total_seconds: rollup?.totalSeconds ?? 0,
+        entry_count: rollup?.entryCount ?? 0,
+      });
     }
+  }
 
   const byName = new Map<string, StoredProject>();
   for (const project of canonical.values()) {
@@ -289,6 +307,7 @@ export async function listProjects(): Promise<StoredProject[]> {
     if (!existing.project_color && project.project_color) {
       existing.project_color = project.project_color;
     }
+    existing.project_archived = (existing.project_archived ?? false) && (project.project_archived ?? false);
   }
 
   return Array.from(byName.values()).sort((a, b) => a.project_name.localeCompare(b.project_name));
@@ -338,16 +357,18 @@ export async function updateProject(input: {
   name?: string | null;
   color?: string | null;
   projectType?: "work" | "non_work" | null;
+  archived?: boolean | null;
 }): Promise<{
   projectKey: string;
   projectName: string;
   projectColor: string;
   projectType: "work" | "non_work";
+  projectArchived: boolean;
 }> {
   const key = input.key.trim();
   if (!key) throw new Error("Project key is required");
 
-  const patch: Record<string, string> = {};
+  const patch: Record<string, string | boolean> = {};
   if (typeof input.name === "string") {
     const normalizedName = normalizeProjectName(input.name);
     if (!normalizedName) throw new Error("Project name is required");
@@ -366,6 +387,9 @@ export async function updateProject(input: {
     }
     patch.project_type = input.projectType;
   }
+  if (typeof input.archived === "boolean") {
+    patch.project_archived = input.archived;
+  }
   if (Object.keys(patch).length === 0) {
     throw new Error("Nothing to update");
   }
@@ -379,10 +403,15 @@ export async function updateProject(input: {
     body: JSON.stringify(patch),
     cache: "no-store",
   });
-  if (!response.ok && Object.prototype.hasOwnProperty.call(patch, "project_type")) {
-    // Backward compatibility if project_type column is not yet migrated.
+  if (
+    !response.ok &&
+    (Object.prototype.hasOwnProperty.call(patch, "project_type") ||
+      Object.prototype.hasOwnProperty.call(patch, "project_archived"))
+  ) {
+    // Backward compatibility if project_type/project_archived columns are not yet migrated.
     const legacyPatch = { ...patch };
     delete legacyPatch.project_type;
+    delete legacyPatch.project_archived;
     if (Object.keys(legacyPatch).length > 0) {
       response = await fetch(`${getBaseUrl()}/rest/v1/projects?project_key=eq.${encodeURIComponent(key)}`, {
         method: "PATCH",
@@ -401,6 +430,7 @@ export async function updateProject(input: {
     project_name: string;
     project_color?: string;
     project_type?: "work" | "non_work";
+    project_archived?: boolean;
   }>;
   const row = rows[0];
   if (!row) throw new Error("Project not found");
@@ -409,7 +439,28 @@ export async function updateProject(input: {
     projectName: row.project_name,
     projectColor: row.project_color ?? DEFAULT_PROJECT_COLOR,
     projectType: row.project_type === "non_work" ? "non_work" : "work",
+    projectArchived: row.project_archived === true,
   };
+}
+
+export async function deleteProject(keyInput: string): Promise<void> {
+  const key = keyInput.trim();
+  if (!key) throw new Error("Project key is required");
+  const response = await fetch(`${getBaseUrl()}/rest/v1/projects?project_key=eq.${encodeURIComponent(key)}`, {
+    method: "DELETE",
+    headers: {
+      ...supabaseHeaders(),
+      Prefer: "return=representation",
+    },
+    cache: "no-store",
+  });
+  if (response.ok) return;
+
+  const message = await response.text();
+  if (response.status === 409 || message.includes("violates foreign key constraint")) {
+    throw new Error("This project has time entries. Archive it instead of deleting.");
+  }
+  throw new Error("Failed to delete project");
 }
 
 export async function listMemberKpis(memberName?: string | null): Promise<StoredKpi[]> {

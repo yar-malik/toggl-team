@@ -537,6 +537,7 @@ export default function TimeDashboard({
   const [modalProjectPickerOpen, setModalProjectPickerOpen] = useState(false);
   const [modalProjectSearch, setModalProjectSearch] = useState("");
   const [rankingView, setRankingView] = useState<"daily" | "weekly" | "monthly" | "anomaly">("daily");
+  const [hiddenAnomalyMembers, setHiddenAnomalyMembers] = useState<string[]>([]);
   const [blockDrag, setBlockDrag] = useState<BlockDragState | null>(null);
   const dayCalendarScrollRef = useRef<HTMLDivElement | null>(null);
   const allCalendarsScrollRef = useRef<HTMLDivElement | null>(null);
@@ -1293,13 +1294,23 @@ export default function TimeDashboard({
       .map((member) => ({ name: member.name, days: member.days }));
   }, [teamWeekData, selectedMembersLower]);
 
+  useEffect(() => {
+    setHiddenAnomalyMembers((previous) => previous.filter((name) => anomalyMembers.some((member) => member.name === name)));
+  }, [anomalyMembers]);
+
+  const visibleAnomalyMembers = useMemo(() => {
+    if (hiddenAnomalyMembers.length === 0) return anomalyMembers;
+    const hidden = new Set(hiddenAnomalyMembers);
+    return anomalyMembers.filter((member) => !hidden.has(member.name));
+  }, [anomalyMembers, hiddenAnomalyMembers]);
+
   const anomalyMaxHours = useMemo(() => {
-    const maxSeconds = anomalyMembers.reduce((outerMax, member) => {
+    const maxSeconds = visibleAnomalyMembers.reduce((outerMax, member) => {
       const memberMax = member.days.reduce((innerMax, day) => Math.max(innerMax, day.seconds), 0);
       return Math.max(outerMax, memberMax);
     }, 0);
     return Math.max(1, Math.ceil(maxSeconds / 3600));
-  }, [anomalyMembers]);
+  }, [visibleAnomalyMembers]);
 
   const anomalyAxisTicks = useMemo(() => {
     return [4, 3, 2, 1, 0].map((step) => ({
@@ -1315,9 +1326,9 @@ export default function TimeDashboard({
     return map;
   }, [anomalyMembers, memberColorMap]);
   const anomalyBarWidthPx = useMemo(() => {
-    const count = Math.max(1, anomalyMembers.length);
+    const count = Math.max(1, visibleAnomalyMembers.length);
     return Math.max(10, Math.min(24, Math.floor(110 / count)));
-  }, [anomalyMembers]);
+  }, [visibleAnomalyMembers]);
 
   const teamTimeline = useMemo(() => {
     if (!teamData) return [] as Array<{ name: string; blocks: TimelineBlock[]; maxLanes: number }>;
@@ -1752,6 +1763,9 @@ export default function TimeDashboard({
               </p>
             ) : rankingView === "anomaly" ? (
               <>
+                {visibleAnomalyMembers.length === 0 && (
+                  <p className="mt-3 text-sm text-slate-500">All members are hidden. Click a name below to show it again.</p>
+                )}
                 <div className="mt-3 grid grid-cols-[3.2rem_1fr] gap-2">
                   <div className="relative h-44">
                     {anomalyAxisTicks.map((tick) => (
@@ -1781,7 +1795,7 @@ export default function TimeDashboard({
                       {(teamWeekData?.weekDates ?? []).map((day) => (
                         <div key={`anomaly-day-${day}`} className="flex h-full min-w-0 flex-col items-center justify-end gap-1">
                           <div className="flex h-full items-end gap-px">
-                          {anomalyMembers.map((member) => {
+                          {visibleAnomalyMembers.map((member) => {
                               const point = member.days.find((item) => item.date === day);
                               const seconds = point?.seconds ?? 0;
                               const hours = seconds / 3600;
@@ -1824,21 +1838,30 @@ export default function TimeDashboard({
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   {anomalyMembers.map((member) => (
-                    <div
+                    <button
                       key={`anomaly-legend-${member.name}`}
-                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-700"
+                      type="button"
+                      onClick={() =>
+                        setHiddenAnomalyMembers((previous) =>
+                          previous.includes(member.name)
+                            ? previous.filter((name) => name !== member.name)
+                            : [...previous, member.name]
+                        )
+                      }
+                      className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+                        hiddenAnomalyMembers.includes(member.name)
+                          ? "border-slate-200 bg-slate-100 text-slate-500"
+                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                      }`}
+                      title={hiddenAnomalyMembers.includes(member.name) ? `Show ${member.name}` : `Hide ${member.name}`}
                     >
                       <span
                         className="inline-block h-2.5 w-2.5 rounded-full"
                         style={{ backgroundColor: anomalyMemberColors.get(member.name) ?? "#64748b" }}
                       />
                       <span className="max-w-[110px] truncate">{member.name}</span>
-                    </div>
+                    </button>
                   ))}
-                  <div className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-medium text-rose-700">
-                    <span className="inline-block h-2.5 w-2.5 rounded-full bg-rose-500" />
-                    <span>Anomaly (&gt;12h)</span>
-                  </div>
                 </div>
               </>
             ) : (
