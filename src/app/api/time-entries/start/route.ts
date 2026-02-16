@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveCanonicalMemberName, startManualTimer } from "@/lib/manualTimeEntriesStore";
+import {
+  autoStopLongRunningTimers,
+  isMaxTimeEntryError,
+  resolveCanonicalMemberName,
+  startManualTimer,
+} from "@/lib/manualTimeEntriesStore";
 import { readIdempotentResponse, writeIdempotentResponse } from "@/lib/idempotency";
 
 export const dynamic = "force-dynamic";
@@ -42,6 +47,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    await autoStopLongRunningTimers([canonicalMember], body.tzOffset);
     const result = await startManualTimer({
       memberName: canonicalMember,
       description: body.description ?? null,
@@ -80,14 +86,15 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to start timer";
     const responseBody = { error: message };
+    const status = isMaxTimeEntryError(message) ? 400 : 500;
     await writeIdempotentResponse({
       scope: "time-entries-start",
       member: canonicalMember,
       idempotencyKey,
-      status: 500,
+      status,
       body: responseBody,
       ttlSeconds: 120,
     });
-    return NextResponse.json(responseBody, { status: 500 });
+    return NextResponse.json(responseBody, { status });
   }
 }

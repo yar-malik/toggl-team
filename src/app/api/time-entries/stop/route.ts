@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveCanonicalMemberName, stopManualTimer } from "@/lib/manualTimeEntriesStore";
+import { autoStopLongRunningTimers, resolveCanonicalMemberName, stopManualTimer } from "@/lib/manualTimeEntriesStore";
 import { readIdempotentResponse, writeIdempotentResponse } from "@/lib/idempotency";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +39,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    await autoStopLongRunningTimers([canonicalMember], body.tzOffset);
     const result = await stopManualTimer({
       memberName: canonicalMember,
       tzOffsetMinutes: body.tzOffset,

@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { backdateRunningEntry, getRunningEntry, resolveCanonicalMemberName, updateRunningEntryMetadata } from "@/lib/manualTimeEntriesStore";
+import {
+  autoStopLongRunningTimers,
+  backdateRunningEntry,
+  getRunningEntry,
+  isMaxTimeEntryError,
+  resolveCanonicalMemberName,
+  updateRunningEntryMetadata,
+} from "@/lib/manualTimeEntriesStore";
 import { readIdempotentResponse, writeIdempotentResponse } from "@/lib/idempotency";
 
 export const dynamic = "force-dynamic";
@@ -18,11 +25,16 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const autoStoppedCount = await autoStopLongRunningTimers([canonicalMember], Number(searchParams.get("tzOffset")));
     const entry = await getRunningEntry(canonicalMember);
     return NextResponse.json({
       member: canonicalMember,
       current: entry,
       cachedAt: new Date().toISOString(),
+      warning:
+        autoStoppedCount > 0
+          ? `${autoStoppedCount} running time entr${autoStoppedCount === 1 ? "y was" : "ies were"} auto-stopped at 2 hours.`
+          : null,
       source: "db",
     });
   } catch (error) {
@@ -68,6 +80,7 @@ export async function PATCH(request: NextRequest) {
   }
 
   try {
+    await autoStopLongRunningTimers([canonicalMember], body.tzOffset);
     const elapsedSeconds = Number(body.elapsedSeconds);
     const updated =
       Number.isFinite(elapsedSeconds) && elapsedSeconds >= 0
@@ -102,14 +115,15 @@ export async function PATCH(request: NextRequest) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to update running timer";
     const responseBody = { error: message };
+    const status = isMaxTimeEntryError(message) ? 400 : 500;
     await writeIdempotentResponse({
       scope: "time-entries-current-patch",
       member: canonicalMember,
       idempotencyKey,
-      status: 500,
+      status,
       body: responseBody,
       ttlSeconds: 60,
     });
-    return NextResponse.json(responseBody, { status: 500 });
+    return NextResponse.json(responseBody, { status });
   }
 }

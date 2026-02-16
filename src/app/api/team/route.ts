@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { canonicalizeMemberName, expandMemberAliases } from "@/lib/memberNames";
-import { listMemberProfiles } from "@/lib/manualTimeEntriesStore";
+import { autoStopLongRunningTimers, listMemberProfiles } from "@/lib/manualTimeEntriesStore";
 import { assignUniquePastelColors } from "@/lib/projectColors";
 
 export const dynamic = "force-dynamic";
@@ -230,18 +230,29 @@ export async function GET(request: NextRequest) {
   }
 
   const { startDate, endDate } = buildUtcDayRange(dateInput, tzOffsetMinutes);
+  const autoStoppedCount = await autoStopLongRunningTimers(
+    members.map((member) => member.name),
+    tzOffsetMinutes
+  );
   const stored = await readStoredTeam(members, startDate, endDate);
   if (!stored) {
     return NextResponse.json({ error: "Supabase history is not configured" }, { status: 500 });
   }
 
   const hasData = stored.members.some((member) => member.entries.length > 0);
+  const warningParts: string[] = [];
+  if (!hasData) warningParts.push("No stored team entries for this day yet.");
+  if (autoStoppedCount > 0) {
+    warningParts.push(
+      `${autoStoppedCount} running time entr${autoStoppedCount === 1 ? "y was" : "ies were"} auto-stopped at 2 hours.`
+    );
+  }
   return NextResponse.json({
     date: dateInput,
     members: stored.members,
     cachedAt: stored.cachedAt,
     stale: !hasData,
-    warning: hasData ? null : "No stored team entries for this day yet.",
+    warning: warningParts.length > 0 ? warningParts.join(" ") : null,
     source: "db",
     cooldownActive: false,
     retryAfterSeconds: 0,

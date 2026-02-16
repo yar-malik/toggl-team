@@ -32,6 +32,13 @@ type EnsureProjectResult = {
   projectName: string | null;
 };
 
+export const MAX_TIME_ENTRY_SECONDS = 2 * 60 * 60;
+export const MAX_TIME_ENTRY_ERROR_MESSAGE = "A time entry can't be more than 2 hours.";
+
+export function isMaxTimeEntryError(message: string | null | undefined) {
+  return (message ?? "").includes(MAX_TIME_ENTRY_ERROR_MESSAGE);
+}
+
 export type StoredProject = {
   project_key: string;
   workspace_id: number;
@@ -103,6 +110,12 @@ function normalizeProjectGroupingName(value: string | null | undefined) {
 function normalizeDescription(value: string | null | undefined) {
   const trimmed = value?.trim() ?? "";
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function assertWithinTimeEntryLimit(durationSeconds: number) {
+  if (durationSeconds > MAX_TIME_ENTRY_SECONDS) {
+    throw new Error(MAX_TIME_ENTRY_ERROR_MESSAGE);
+  }
 }
 
 function slugify(value: string) {
@@ -645,6 +658,7 @@ export async function upsertMemberProfile(input: {
 
 export async function getRunningEntry(memberName: string): Promise<RunningEntry | null> {
   if (!isSupabaseConfigured()) return null;
+  await autoStopLongRunningTimers([memberName]);
 
   const url =
     `${getBaseUrl()}/rest/v1/time_entries` +
@@ -709,6 +723,7 @@ export async function startManualTimer(input: {
 
   const tzOffsetMinutes = parseTzOffsetMinutes(input.tzOffsetMinutes);
   const elapsedSeconds = Math.max(0, Math.floor(Number(input.elapsedSeconds ?? 0)));
+  assertWithinTimeEntryLimit(elapsedSeconds);
   const now = new Date();
   const startAt = new Date(now.getTime() - elapsedSeconds * 1000);
   const nowIso = now.toISOString();
@@ -805,7 +820,10 @@ export async function stopManualTimer(input: { memberName: string; tzOffsetMinut
 
   for (const row of runningRows) {
     const startedAtMs = new Date(row.start_at).getTime();
-    const durationSeconds = Number.isNaN(startedAtMs) ? 0 : Math.max(0, Math.floor((now.getTime() - startedAtMs) / 1000));
+    const rawDurationSeconds = Number.isNaN(startedAtMs) ? 0 : Math.max(0, Math.floor((now.getTime() - startedAtMs) / 1000));
+    const durationSeconds = Math.min(rawDurationSeconds, MAX_TIME_ENTRY_SECONDS);
+    const cappedStopAtMs = Number.isNaN(startedAtMs) ? now.getTime() : Math.min(now.getTime(), startedAtMs + MAX_TIME_ENTRY_SECONDS * 1000);
+    const cappedStopAt = new Date(cappedStopAtMs);
     const sourceDate = toLocalDateKey(new Date(row.start_at), tzOffsetMinutes);
     const response = await fetch(`${getBaseUrl()}/rest/v1/time_entries?entry_id=eq.${row.entry_id}`, {
       method: "PATCH",
@@ -814,7 +832,7 @@ export async function stopManualTimer(input: { memberName: string; tzOffsetMinut
         Prefer: "return=representation",
       },
       body: JSON.stringify({
-        stop_at: nowIso,
+        stop_at: cappedStopAt.toISOString(),
         duration_seconds: durationSeconds,
         is_running: false,
         source_date: sourceDate,
@@ -913,6 +931,7 @@ export async function backdateRunningEntry(input: {
   if (!running) return null;
 
   const elapsedSeconds = Math.max(0, Math.floor(input.elapsedSeconds));
+  assertWithinTimeEntryLimit(elapsedSeconds);
   const startAt = new Date(Date.now() - elapsedSeconds * 1000);
   const tzOffsetMinutes = parseTzOffsetMinutes(input.tzOffsetMinutes);
   const sourceDate = toLocalDateKey(startAt, tzOffsetMinutes);
@@ -978,6 +997,7 @@ export async function createManualTimeEntry(input: {
     throw new Error("Invalid start time");
   }
   const durationSeconds = Math.max(0, Math.floor(input.durationSeconds));
+  assertWithinTimeEntryLimit(durationSeconds);
   const stopAt = new Date(startAt.getTime() + durationSeconds * 1000);
   const nowIso = new Date().toISOString();
   const tzOffsetMinutes = parseTzOffsetMinutes(input.tzOffsetMinutes);
@@ -1091,6 +1111,7 @@ export async function updateStoredTimeEntry(input: {
   await ensureMember(input.memberName);
   const { projectKey, projectName } = await ensureManualProject(input.projectName);
   const durationSeconds = Math.max(0, Math.floor((stopAt.getTime() - startAt.getTime()) / 1000));
+  assertWithinTimeEntryLimit(durationSeconds);
   const tzOffsetMinutes = parseTzOffsetMinutes(input.tzOffsetMinutes);
   const sourceDate = toLocalDateKey(startAt, tzOffsetMinutes);
   const nowIso = new Date().toISOString();
@@ -1137,6 +1158,74 @@ export async function updateStoredTimeEntry(input: {
     durationSeconds: updated.duration_seconds,
     source: updated.entry_source || "manual",
   };
+}
+
+export async function autoStopLongRunningTimers(memberNames: string[], tzOffsetMinutes?: number | null) {
+  if (!isSupabaseConfigured()) return 0;
+
+  const normalizedMembers = Array.from(
+    new Set(
+      memberNames
+        .map((name) => canonicalizeMemberName(name))
+        .filter((name) => name.length > 0)
+    )
+  );
+  if (normalizedMembers.length === 0) return 0;
+
+  const tzOffset = parseTzOffsetMinutes(tzOffsetMinutes);
+  const now = new Date();
+  const nowMs = now.getTime();
+  const nowIso = now.toISOString();
+  let stoppedCount = 0;
+
+  for (const memberName of normalizedMembers) {
+    const rowsResponse = await fetch(
+      `${getBaseUrl()}/rest/v1/time_entries?select=entry_id,start_at&member_name=eq.${encodeURIComponent(
+        memberName
+      )}&is_running=eq.true&order=start_at.asc`,
+      {
+        method: "GET",
+        headers: supabaseHeaders(),
+        cache: "no-store",
+      }
+    );
+    if (!rowsResponse.ok) continue;
+    const runningRows = (await rowsResponse.json()) as Array<{ entry_id: number; start_at: string }>;
+    if (runningRows.length === 0) continue;
+
+    for (const row of runningRows) {
+      const startedAtMs = new Date(row.start_at).getTime();
+      if (Number.isNaN(startedAtMs)) continue;
+      const maxStopAtMs = startedAtMs + MAX_TIME_ENTRY_SECONDS * 1000;
+      if (nowMs <= maxStopAtMs) continue;
+
+      const cappedStopAt = new Date(maxStopAtMs);
+      const sourceDate = toLocalDateKey(new Date(row.start_at), tzOffset);
+      const patchResponse = await fetch(`${getBaseUrl()}/rest/v1/time_entries?entry_id=eq.${row.entry_id}`, {
+        method: "PATCH",
+        headers: {
+          ...supabaseHeaders(),
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({
+          stop_at: cappedStopAt.toISOString(),
+          duration_seconds: MAX_TIME_ENTRY_SECONDS,
+          is_running: false,
+          source_date: sourceDate,
+          synced_at: nowIso,
+          raw: {
+            source: "manual",
+            action: "auto_stop_2h_limit",
+            edited_at: nowIso,
+          },
+        }),
+        cache: "no-store",
+      });
+      if (patchResponse.ok) stoppedCount += 1;
+    }
+  }
+
+  return stoppedCount;
 }
 
 export async function deleteStoredTimeEntry(input: {

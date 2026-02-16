@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveCanonicalMemberName, updateStoredTimeEntry } from "@/lib/manualTimeEntriesStore";
+import {
+  autoStopLongRunningTimers,
+  isMaxTimeEntryError,
+  resolveCanonicalMemberName,
+  updateStoredTimeEntry,
+} from "@/lib/manualTimeEntriesStore";
 import { readIdempotentResponse, writeIdempotentResponse } from "@/lib/idempotency";
 
 export const dynamic = "force-dynamic";
@@ -54,6 +59,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    await autoStopLongRunningTimers([canonicalMember], body.tzOffset);
     const entry = await updateStoredTimeEntry({
       memberName: canonicalMember,
       entryId,
@@ -79,14 +85,15 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to update entry";
     const responseBody = { error: message };
+    const status = isMaxTimeEntryError(message) ? 400 : 500;
     await writeIdempotentResponse({
       scope: "time-entries-update",
       member: canonicalMember,
       idempotencyKey,
-      status: 500,
+      status,
       body: responseBody,
       ttlSeconds: 120,
     });
-    return NextResponse.json(responseBody, { status: 500 });
+    return NextResponse.json(responseBody, { status });
   }
 }

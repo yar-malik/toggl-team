@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createManualTimeEntry, resolveCanonicalMemberName } from "@/lib/manualTimeEntriesStore";
+import {
+  autoStopLongRunningTimers,
+  createManualTimeEntry,
+  isMaxTimeEntryError,
+  MAX_TIME_ENTRY_SECONDS,
+  resolveCanonicalMemberName,
+} from "@/lib/manualTimeEntriesStore";
 import { readIdempotentResponse, writeIdempotentResponse } from "@/lib/idempotency";
 
 export const dynamic = "force-dynamic";
@@ -50,8 +56,12 @@ export async function POST(request: NextRequest) {
   if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
     return NextResponse.json({ error: "durationMinutes must be > 0" }, { status: 400 });
   }
+  if (Math.round(durationMinutes * 60) > MAX_TIME_ENTRY_SECONDS) {
+    return NextResponse.json({ error: "A time entry can't be more than 2 hours." }, { status: 400 });
+  }
 
   try {
+    await autoStopLongRunningTimers([canonicalMember], body.tzOffset);
     const entry = await createManualTimeEntry({
       memberName: canonicalMember,
       description: body.description ?? null,
@@ -77,14 +87,15 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to create manual entry";
     const responseBody = { error: message };
+    const status = isMaxTimeEntryError(message) ? 400 : 500;
     await writeIdempotentResponse({
       scope: "time-entries-manual",
       member: canonicalMember,
       idempotencyKey,
-      status: 500,
+      status,
       body: responseBody,
       ttlSeconds: 120,
     });
-    return NextResponse.json(responseBody, { status: 500 });
+    return NextResponse.json(responseBody, { status });
   }
 }

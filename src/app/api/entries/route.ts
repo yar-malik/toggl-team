@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { canonicalizeMemberName, namesMatch } from "@/lib/memberNames";
-import { listMembers } from "@/lib/manualTimeEntriesStore";
+import { autoStopLongRunningTimers, listMembers } from "@/lib/manualTimeEntriesStore";
 import { assignUniquePastelColors } from "@/lib/projectColors";
 
 export const dynamic = "force-dynamic";
@@ -202,14 +202,23 @@ export async function GET(request: NextRequest) {
   }
 
   const { startDate, endDate } = buildUtcDayRange(dateInput, tzOffsetMinutes);
+  const autoStoppedCount = await autoStopLongRunningTimers([member], tzOffsetMinutes);
   const stored = await readStoredEntries(member, startDate, endDate);
 
   if (stored) {
+    const warningParts: string[] = [];
+    if (autoStoppedCount > 0) {
+      warningParts.push(
+        `${autoStoppedCount} running time entr${autoStoppedCount === 1 ? "y was" : "ies were"} auto-stopped at 2 hours.`
+      );
+    }
+    const existingWarning = stored.warning?.trim();
+    if (existingWarning) warningParts.unshift(existingWarning);
     return NextResponse.json({
       ...stored,
       date: dateInput,
       stale: false,
-      warning: null,
+      warning: warningParts.length > 0 ? warningParts.join(" ") : null,
       source: "db",
       cooldownActive: false,
       retryAfterSeconds: 0,
