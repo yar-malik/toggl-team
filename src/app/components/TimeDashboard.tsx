@@ -1159,6 +1159,41 @@ export default function TimeDashboard({
       value: Math.round((dailyRankingMaxHours * step) / 4),
     }));
   }, [dailyRankingMaxHours]);
+  const weeklyRankingSeries = useMemo(() => {
+    if (!teamWeekData) return [] as Array<{ name: string; seconds: number; isRunning: boolean }>;
+    const runningMemberSet = new Set(
+      (teamData?.members ?? [])
+        .filter((memberData) => Boolean(memberData.current ?? memberData.entries.find((entry) => entry.stop === null)))
+        .map((memberData) => memberData.name.trim().toLowerCase())
+    );
+    return teamWeekData.members
+      .filter((row) => {
+        if (selectedMembersLower.size === 0) return true;
+        return selectedMembersLower.has(row.name.trim().toLowerCase());
+      })
+      .map((row) => ({
+        name: row.name,
+        seconds: row.totalSeconds,
+        isRunning: runningMemberSet.has(row.name.trim().toLowerCase()),
+      }))
+      .sort((a, b) => {
+        if (b.seconds !== a.seconds) return b.seconds - a.seconds;
+        return a.name.localeCompare(b.name);
+      });
+  }, [teamWeekData, teamData, selectedMembersLower]);
+
+  const weeklyRankingMaxHours = useMemo(() => {
+    const maxSeconds = weeklyRankingSeries.reduce((max, row) => Math.max(max, row.seconds), 0);
+    const maxHours = maxSeconds / 3600;
+    return Math.max(1, Math.ceil(maxHours));
+  }, [weeklyRankingSeries]);
+
+  const weeklyRankingAxisTicks = useMemo(() => {
+    return [4, 3, 2, 1, 0].map((step) => ({
+      step,
+      value: Math.round((weeklyRankingMaxHours * step) / 4),
+    }));
+  }, [weeklyRankingMaxHours]);
 
   const teamTimeline = useMemo(() => {
     if (!teamData) return [] as Array<{ name: string; blocks: TimelineBlock[]; maxLanes: number }>;
@@ -1525,7 +1560,7 @@ export default function TimeDashboard({
           </div>
         )}
         {(mode === "all" || mode === "team") && (
-          <div className="md:col-span-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+          <div className="md:col-span-2 rounded-xl border border-slate-200 bg-white px-4 py-3">
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Daily ranking</span>
               <span className="text-xs text-slate-500">{date}</span>
@@ -1583,6 +1618,81 @@ export default function TimeDashboard({
                               placeHoverTooltip(
                                 event,
                                 `${row.name}\nTotal hours worked: ${formatDuration(row.seconds)}${
+                                  row.isRunning ? "\nStatus: Running" : ""
+                                }`
+                              )
+                            }
+                            onMouseLeave={hideHoverTooltip}
+                          />
+                          <p className="w-full truncate text-center text-[11px] font-semibold text-slate-700">{row.name}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {(mode === "all" || mode === "team") && (
+          <div className="md:col-span-2 rounded-xl border border-slate-200 bg-white px-4 py-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Weekly ranking</span>
+              <span className="text-xs text-slate-500">
+                {teamWeekData ? `${teamWeekData.startDate} → ${teamWeekData.endDate}` : "Last 7 days"}
+              </span>
+            </div>
+            {weeklyRankingSeries.length === 0 ? (
+              <p className="mt-3 text-sm text-slate-500">No weekly data yet.</p>
+            ) : (
+              <div className="mt-3 grid grid-cols-[3.2rem_1fr] gap-2">
+                <div className="relative h-40">
+                  {weeklyRankingAxisTicks.map((tick) => (
+                    <div
+                      key={tick.step}
+                      className="absolute right-0 text-[10px] font-medium text-slate-500"
+                      style={{ top: `${(4 - tick.step) * 25}%`, transform: "translateY(-50%)" }}
+                    >
+                      {tick.value}h
+                    </div>
+                  ))}
+                </div>
+                <div className="relative h-40 rounded-lg border border-slate-200 bg-slate-50 px-2 pt-2">
+                  {[0, 1, 2, 3, 4].map((step) => (
+                    <div
+                      key={`weekly-grid-${step}`}
+                      className="absolute left-0 right-0 border-t border-slate-200"
+                      style={{ top: `${step * 25}%` }}
+                    />
+                  ))}
+                  <div className="relative z-10 flex h-full items-end gap-2">
+                    {weeklyRankingSeries.map((row) => {
+                      const hours = row.seconds / 3600;
+                      const heightPercent = Math.max(6, (hours / weeklyRankingMaxHours) * 100);
+                      return (
+                        <div key={row.name} className="flex h-full min-w-[56px] flex-1 flex-col items-center justify-end gap-1">
+                          <div
+                            className={`w-full rounded-t-md ${
+                              row.isRunning
+                                ? "bg-gradient-to-t from-emerald-500 to-emerald-300"
+                                : "bg-gradient-to-t from-[#0BA5E9] to-[#67D0F8]"
+                            }`}
+                            style={{ height: `${heightPercent}%` }}
+                            title={`${row.name} • Total hours worked this week: ${formatDuration(row.seconds)}${
+                              row.isRunning ? " • Running now" : ""
+                            }`}
+                            onMouseEnter={(event) =>
+                              placeHoverTooltip(
+                                event,
+                                `${row.name}\nTotal hours worked this week: ${formatDuration(row.seconds)}${
+                                  row.isRunning ? "\nStatus: Running" : ""
+                                }`
+                              )
+                            }
+                            onMouseMove={(event) =>
+                              placeHoverTooltip(
+                                event,
+                                `${row.name}\nTotal hours worked this week: ${formatDuration(row.seconds)}${
                                   row.isRunning ? "\nStatus: Running" : ""
                                 }`
                               )
