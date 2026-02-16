@@ -1,6 +1,6 @@
-# Voho Track
+# Voho Tracker
 
-Voho Track is a DB-first team time-tracking platform built with Next.js + Supabase.
+Voho Tracker is a DB-first team time-tracking platform built with Next.js + Supabase.
 
 ## Getting Started
 

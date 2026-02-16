@@ -184,7 +184,7 @@ export default function PlatformShell({
   const [fallbackDurationSeconds, setFallbackDurationSeconds] = useState(0);
   const [currentTaskLabel, setCurrentTaskLabel] = useState<string>("");
   const [nowMs, setNowMs] = useState(0);
-  const defaultTitleRef = useRef("Voho Track");
+  const defaultTitleRef = useRef("Voho Tracker");
   const [pomodoroState, setPomodoroState] = useState<PomodoroState>({
     secondsLeft: 25 * 60,
     running: false,
@@ -197,7 +197,7 @@ export default function PlatformShell({
   const completionCountRef = useRef(0);
 
   useEffect(() => {
-    defaultTitleRef.current = document.title || "Voho Track";
+    defaultTitleRef.current = document.title || "Voho Tracker";
   }, []);
 
   useEffect(() => {
@@ -338,7 +338,7 @@ export default function PlatformShell({
       <div className="mx-auto flex w-full max-w-[1700px] gap-4 px-4 py-4 md:px-6">
         <aside className="sticky top-4 hidden h-[calc(100vh-2rem)] w-[280px] shrink-0 rounded-3xl border border-slate-200 bg-white/90 p-4 shadow-[0_20px_40px_rgba(15,23,42,0.08)] backdrop-blur lg:flex lg:flex-col">
           <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-sky-50 to-cyan-50 p-3 shadow-sm">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Voho Track</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Voho Tracker</p>
             <p className="mt-1 truncate text-sm font-medium text-slate-700">{currentMemberName ?? currentUserEmail ?? "Signed in"}</p>
           </div>
 

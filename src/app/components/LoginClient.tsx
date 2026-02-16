@@ -49,7 +49,7 @@ export default function LoginClient() {
       <main className="relative mx-auto flex min-h-screen w-full max-w-7xl items-center px-6 py-12">
         <div className="grid w-full gap-8 lg:grid-cols-[1.2fr_0.8fr]">
           <section className="rounded-3xl border border-white/10 bg-white/[0.06] p-8 text-white shadow-[0_30px_80px_rgba(2,6,23,0.55)] backdrop-blur-xl md:p-10">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200/90">Voho Track</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200/90">Voho Tracker</p>
             <h1 className="mt-4 max-w-2xl text-3xl font-semibold leading-tight text-white md:text-5xl">
               Time tracking that feels as polished as your product.
             </h1>
@@ -109,7 +109,7 @@ export default function LoginClient() {
                 onClick={() => void handleLogin()}
                 className="w-full rounded-xl bg-[#0BA5E9] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#0994cf] disabled:cursor-not-allowed disabled:bg-slate-400"
               >
-                {busy ? "Signing in..." : "Sign in to Voho Track"}
+                {busy ? "Signing in..." : "Sign in to Voho Tracker"}
               </button>
 
               {error && <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}

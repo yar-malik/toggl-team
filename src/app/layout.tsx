@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Voho Track",
-  description: "Voho Track dashboard",
+  title: "Voho Tracker",
+  description: "Voho Tracker dashboard",
   icons: {
     icon: "/favicon-idle-v2.svg",
     shortcut: "/favicon-idle-v2.svg",
