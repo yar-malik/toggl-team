@@ -478,6 +478,7 @@ export default function TimeDashboard({
   const [data, setData] = useState<EntriesResponse | null>(null);
   const [teamData, setTeamData] = useState<TeamResponse | null>(null);
   const [teamWeekData, setTeamWeekData] = useState<TeamWeekResponse | null>(null);
+  const [teamMonthData, setTeamMonthData] = useState<TeamWeekResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<"member" | "team" | "all">("all");
@@ -505,7 +506,7 @@ export default function TimeDashboard({
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [modalProjectPickerOpen, setModalProjectPickerOpen] = useState(false);
   const [modalProjectSearch, setModalProjectSearch] = useState("");
-  const [rankingView, setRankingView] = useState<"daily" | "weekly">("daily");
+  const [rankingView, setRankingView] = useState<"daily" | "weekly" | "monthly">("daily");
   const [blockDrag, setBlockDrag] = useState<BlockDragState | null>(null);
   const dayCalendarScrollRef = useRef<HTMLDivElement | null>(null);
   const allCalendarsScrollRef = useRef<HTMLDivElement | null>(null);
@@ -735,6 +736,23 @@ export default function TimeDashboard({
       .catch(() => {
         if (!active) return;
         // keep previous weekly snapshot if fetch fails
+      });
+
+    fetch(`/api/team-month?${params.toString()}`, { cache: "no-store" })
+      .then(async (res) => {
+        const payload = (await res.json()) as TeamWeekResponse;
+        if (!res.ok || payload.error) {
+          throw new Error(payload.error || "Failed to load 30-day summary");
+        }
+        return payload;
+      })
+      .then((payload) => {
+        if (!active) return;
+        setTeamMonthData(payload);
+      })
+      .catch(() => {
+        if (!active) return;
+        // keep previous monthly snapshot if fetch fails
       });
 
     return () => {
@@ -1195,6 +1213,41 @@ export default function TimeDashboard({
       value: Math.round((weeklyRankingMaxHours * step) / 4),
     }));
   }, [weeklyRankingMaxHours]);
+  const monthlyRankingSeries = useMemo(() => {
+    if (!teamMonthData) return [] as Array<{ name: string; seconds: number; isRunning: boolean }>;
+    const runningMemberSet = new Set(
+      (teamData?.members ?? [])
+        .filter((memberData) => Boolean(memberData.current ?? memberData.entries.find((entry) => entry.stop === null)))
+        .map((memberData) => memberData.name.trim().toLowerCase())
+    );
+    return teamMonthData.members
+      .filter((row) => {
+        if (selectedMembersLower.size === 0) return true;
+        return selectedMembersLower.has(row.name.trim().toLowerCase());
+      })
+      .map((row) => ({
+        name: row.name,
+        seconds: row.totalSeconds,
+        isRunning: runningMemberSet.has(row.name.trim().toLowerCase()),
+      }))
+      .sort((a, b) => {
+        if (b.seconds !== a.seconds) return b.seconds - a.seconds;
+        return a.name.localeCompare(b.name);
+      });
+  }, [teamMonthData, teamData, selectedMembersLower]);
+
+  const monthlyRankingMaxHours = useMemo(() => {
+    const maxSeconds = monthlyRankingSeries.reduce((max, row) => Math.max(max, row.seconds), 0);
+    const maxHours = maxSeconds / 3600;
+    return Math.max(1, Math.ceil(maxHours));
+  }, [monthlyRankingSeries]);
+
+  const monthlyRankingAxisTicks = useMemo(() => {
+    return [4, 3, 2, 1, 0].map((step) => ({
+      step,
+      value: Math.round((monthlyRankingMaxHours * step) / 4),
+    }));
+  }, [monthlyRankingMaxHours]);
 
   const teamTimeline = useMemo(() => {
     if (!teamData) return [] as Array<{ name: string; blocks: TimelineBlock[]; maxLanes: number }>;
@@ -1582,21 +1635,43 @@ export default function TimeDashboard({
                 >
                   Weekly
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setRankingView("monthly")}
+                  className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
+                    rankingView === "monthly" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600"
+                  }`}
+                >
+                  Monthly
+                </button>
               </div>
               <span className="text-xs text-slate-500">
                 {rankingView === "daily"
                   ? date
-                  : teamWeekData
-                  ? `${teamWeekData.startDate} → ${teamWeekData.endDate}`
-                  : "Last 7 days"}
+                  : rankingView === "weekly"
+                  ? teamWeekData
+                    ? `${teamWeekData.startDate} → ${teamWeekData.endDate}`
+                    : "Last 7 days"
+                  : teamMonthData
+                  ? `${teamMonthData.startDate} → ${teamMonthData.endDate}`
+                  : "Last 30 days"}
               </span>
             </div>
-            {(rankingView === "daily" ? dailyRankingSeries.length === 0 : weeklyRankingSeries.length === 0) ? (
+            {(rankingView === "daily"
+              ? dailyRankingSeries.length === 0
+              : rankingView === "weekly"
+              ? weeklyRankingSeries.length === 0
+              : monthlyRankingSeries.length === 0) ? (
               <p className="mt-3 text-sm text-slate-500">No {rankingView} data yet.</p>
             ) : (
               <div className="mt-3 grid grid-cols-[3.2rem_1fr] gap-2">
                 <div className="relative h-40">
-                  {(rankingView === "daily" ? dailyRankingAxisTicks : weeklyRankingAxisTicks).map((tick) => (
+                  {(rankingView === "daily"
+                    ? dailyRankingAxisTicks
+                    : rankingView === "weekly"
+                    ? weeklyRankingAxisTicks
+                    : monthlyRankingAxisTicks
+                  ).map((tick) => (
                     <div
                       key={`${rankingView}-${tick.step}`}
                       className="absolute right-0 text-[10px] font-medium text-slate-500"
@@ -1615,11 +1690,26 @@ export default function TimeDashboard({
                     />
                   ))}
                   <div className="relative z-10 flex h-full items-end gap-2">
-                    {(rankingView === "daily" ? dailyRankingSeries : weeklyRankingSeries).map((row) => {
-                      const maxHours = rankingView === "daily" ? dailyRankingMaxHours : weeklyRankingMaxHours;
+                    {(rankingView === "daily"
+                      ? dailyRankingSeries
+                      : rankingView === "weekly"
+                      ? weeklyRankingSeries
+                      : monthlyRankingSeries
+                    ).map((row) => {
+                      const maxHours =
+                        rankingView === "daily"
+                          ? dailyRankingMaxHours
+                          : rankingView === "weekly"
+                          ? weeklyRankingMaxHours
+                          : monthlyRankingMaxHours;
                       const hours = row.seconds / 3600;
                       const heightPercent = Math.max(6, (hours / maxHours) * 100);
-                      const label = rankingView === "daily" ? "Total hours worked" : "Total hours worked this week";
+                      const label =
+                        rankingView === "daily"
+                          ? "Total hours worked"
+                          : rankingView === "weekly"
+                          ? "Total hours worked this week"
+                          : "Total hours worked this month";
                       return (
                         <div key={`${rankingView}-${row.name}`} className="flex h-full min-w-[56px] flex-1 flex-col items-center justify-end gap-1">
                           <div
