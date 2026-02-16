@@ -454,6 +454,16 @@ function getTaskSummaryTooltip(item: TaskProjectSummaryRow) {
   ].join("\n");
 }
 
+function getMemberChartColor(memberName: string, index: number) {
+  const seed = `${memberName}:${index}`;
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  }
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue} 70% 55%)`;
+}
+
 export default function TimeDashboard({
   members,
   initialMode = "all",
@@ -506,7 +516,7 @@ export default function TimeDashboard({
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [modalProjectPickerOpen, setModalProjectPickerOpen] = useState(false);
   const [modalProjectSearch, setModalProjectSearch] = useState("");
-  const [rankingView, setRankingView] = useState<"daily" | "weekly" | "monthly">("daily");
+  const [rankingView, setRankingView] = useState<"daily" | "weekly" | "monthly" | "anomaly">("daily");
   const [blockDrag, setBlockDrag] = useState<BlockDragState | null>(null);
   const dayCalendarScrollRef = useRef<HTMLDivElement | null>(null);
   const allCalendarsScrollRef = useRef<HTMLDivElement | null>(null);
@@ -1248,6 +1258,31 @@ export default function TimeDashboard({
       value: Math.round((monthlyRankingMaxHours * step) / 4),
     }));
   }, [monthlyRankingMaxHours]);
+  const anomalyMembers = useMemo(() => {
+    if (!teamWeekData) return [] as Array<{ name: string; days: Array<{ date: string; seconds: number; entryCount: number }> }>;
+    return teamWeekData.members
+      .filter((member) => {
+        if (selectedMembersLower.size === 0) return true;
+        return selectedMembersLower.has(member.name.trim().toLowerCase());
+      })
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((member) => ({ name: member.name, days: member.days }));
+  }, [teamWeekData, selectedMembersLower]);
+
+  const anomalyMaxHours = useMemo(() => {
+    const maxSeconds = anomalyMembers.reduce((outerMax, member) => {
+      const memberMax = member.days.reduce((innerMax, day) => Math.max(innerMax, day.seconds), 0);
+      return Math.max(outerMax, memberMax);
+    }, 0);
+    return Math.max(1, Math.ceil(maxSeconds / 3600));
+  }, [anomalyMembers]);
+
+  const anomalyAxisTicks = useMemo(() => {
+    return [4, 3, 2, 1, 0].map((step) => ({
+      step,
+      value: Math.round((anomalyMaxHours * step) / 4),
+    }));
+  }, [anomalyMaxHours]);
 
   const teamTimeline = useMemo(() => {
     if (!teamData) return [] as Array<{ name: string; blocks: TimelineBlock[]; maxLanes: number }>;
@@ -1644,11 +1679,24 @@ export default function TimeDashboard({
                 >
                   Monthly
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setRankingView("anomaly")}
+                  className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
+                    rankingView === "anomaly" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600"
+                  }`}
+                >
+                  7-day anomalies
+                </button>
               </div>
               <span className="text-xs text-slate-500">
                 {rankingView === "daily"
                   ? date
                   : rankingView === "weekly"
+                  ? teamWeekData
+                    ? `${teamWeekData.startDate} → ${teamWeekData.endDate}`
+                    : "Last 7 days"
+                  : rankingView === "anomaly"
                   ? teamWeekData
                     ? `${teamWeekData.startDate} → ${teamWeekData.endDate}`
                     : "Last 7 days"
@@ -1661,8 +1709,77 @@ export default function TimeDashboard({
               ? dailyRankingSeries.length === 0
               : rankingView === "weekly"
               ? weeklyRankingSeries.length === 0
-              : monthlyRankingSeries.length === 0) ? (
+              : rankingView === "monthly"
+              ? monthlyRankingSeries.length === 0
+              : anomalyMembers.length === 0) ? (
               <p className="mt-3 text-sm text-slate-500">No {rankingView} data yet.</p>
+            ) : rankingView === "anomaly" ? (
+              <div className="mt-3 grid grid-cols-[3.2rem_1fr] gap-2">
+                <div className="relative h-44">
+                  {anomalyAxisTicks.map((tick) => (
+                    <div
+                      key={`anomaly-${tick.step}`}
+                      className="absolute right-0 text-[10px] font-medium text-slate-500"
+                      style={{ top: `${(4 - tick.step) * 25}%`, transform: "translateY(-50%)" }}
+                    >
+                      {tick.value}h
+                    </div>
+                  ))}
+                </div>
+                <div className="relative h-44 rounded-lg border border-slate-200 bg-slate-50 px-2 pt-2">
+                  {[0, 1, 2, 3, 4].map((step) => (
+                    <div
+                      key={`anomaly-grid-${step}`}
+                      className="absolute left-0 right-0 border-t border-slate-200"
+                      style={{ top: `${step * 25}%` }}
+                    />
+                  ))}
+                  <div
+                    className="absolute left-0 right-0 border-t border-rose-300 border-dashed"
+                    style={{ top: `${100 - (Math.min(12, anomalyMaxHours) / anomalyMaxHours) * 100}%` }}
+                    title="12h anomaly threshold"
+                  />
+                  <div className="relative z-10 flex h-full items-end gap-3 overflow-x-auto pb-1">
+                    {(teamWeekData?.weekDates ?? []).map((day) => (
+                      <div key={`anomaly-day-${day}`} className="flex h-full min-w-[64px] flex-col items-center justify-end gap-1">
+                        <div className="flex h-full items-end gap-0.5">
+                          {anomalyMembers.map((member, memberIndex) => {
+                            const point = member.days.find((item) => item.date === day);
+                            const seconds = point?.seconds ?? 0;
+                            const hours = seconds / 3600;
+                            const heightPercent = Math.max(2, (hours / anomalyMaxHours) * 100);
+                            const anomaly = hours > 12;
+                            return (
+                              <div
+                                key={`${day}-${member.name}`}
+                                className={`w-1.5 rounded-t-sm ${anomaly ? "bg-rose-500" : ""}`}
+                                style={{ height: `${heightPercent}%`, backgroundColor: anomaly ? undefined : getMemberChartColor(member.name, memberIndex) }}
+                                title={`${member.name} • ${day} • ${formatDuration(seconds)}${anomaly ? " • Possible anomaly" : ""}`}
+                                onMouseEnter={(event) =>
+                                  placeHoverTooltip(
+                                    event,
+                                    `${member.name}\n${day}\nHours worked: ${formatDuration(seconds)}${anomaly ? "\nPossible anomaly (>12h)" : ""}`
+                                  )
+                                }
+                                onMouseMove={(event) =>
+                                  placeHoverTooltip(
+                                    event,
+                                    `${member.name}\n${day}\nHours worked: ${formatDuration(seconds)}${anomaly ? "\nPossible anomaly (>12h)" : ""}`
+                                  )
+                                }
+                                onMouseLeave={hideHoverTooltip}
+                              />
+                            );
+                          })}
+                        </div>
+                        <p className="w-full truncate text-center text-[10px] font-semibold text-slate-700">
+                          {new Date(`${day}T00:00:00`).toLocaleDateString([], { weekday: "short", day: "2-digit" })}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
             ) : (
               <div className="mt-3 grid grid-cols-[3.2rem_1fr] gap-2">
                 <div className="relative h-40">
