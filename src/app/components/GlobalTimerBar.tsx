@@ -548,6 +548,9 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
                   }}
                   className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-slate-50"
                 >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4 text-slate-500" fill="currentColor" aria-hidden="true">
+                    <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3l1.5 1.5h8.5A2.5 2.5 0 0 1 21 9v9.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5z" />
+                  </svg>
                   <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
                   <span className="text-sm font-medium text-slate-700">No project</span>
                 </button>
@@ -562,6 +565,9 @@ export default function GlobalTimerBar({ memberName }: { memberName: string | nu
                     }}
                     className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-slate-50"
                   >
+                    <svg viewBox="0 0 24 24" className="h-4 w-4 text-slate-600" fill="currentColor" aria-hidden="true">
+                      <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3l1.5 1.5h8.5A2.5 2.5 0 0 1 21 9v9.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5z" />
+                    </svg>
                     <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: getProjectBaseColor(project.name, project.color) }} />
                     <span className="truncate text-sm font-semibold text-slate-800">{project.name}</span>
                   </button>

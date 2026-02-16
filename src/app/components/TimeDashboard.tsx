@@ -2433,6 +2433,9 @@ export default function TimeDashboard({
                       onClick={() => setModalProjectPickerOpen((open) => !open)}
                       className="inline-flex min-w-[220px] items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-4 py-1.5 text-left text-xl font-medium text-amber-700"
                     >
+                      <svg viewBox="0 0 24 24" className="h-4 w-4 text-amber-700" fill="currentColor" aria-hidden="true">
+                        <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3l1.5 1.5h8.5A2.5 2.5 0 0 1 21 9v9.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5z" />
+                      </svg>
                       <span
                         className="inline-block h-2.5 w-2.5 rounded-full"
                         style={{ backgroundColor: getProjectBaseColor(entryEditor.project || "No project", modalSelectedProjectColor) }}
@@ -2460,6 +2463,9 @@ export default function TimeDashboard({
                             }}
                             className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-slate-50"
                           >
+                            <svg viewBox="0 0 24 24" className="h-4 w-4 text-slate-500" fill="currentColor" aria-hidden="true">
+                              <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3l1.5 1.5h8.5A2.5 2.5 0 0 1 21 9v9.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5z" />
+                            </svg>
                             <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
                             <span className="text-sm font-medium text-slate-700">No project</span>
                           </button>
@@ -2473,6 +2479,9 @@ export default function TimeDashboard({
                               }}
                               className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-slate-50"
                             >
+                              <svg viewBox="0 0 24 24" className="h-4 w-4 text-slate-600" fill="currentColor" aria-hidden="true">
+                                <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3l1.5 1.5h8.5A2.5 2.5 0 0 1 21 9v9.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5z" />
+                              </svg>
                               <span
                                 className="h-2.5 w-2.5 rounded-full"
                                 style={{ backgroundColor: getProjectBaseColor(project.name, project.color) }}
@@ -2559,8 +2568,17 @@ export default function TimeDashboard({
                       }
                     }}
                     className="rounded-xl border border-rose-300 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                    aria-label={entryEditor.deleting ? "Deleting entry" : "Delete entry"}
                   >
-                    {entryEditor.deleting ? "Deleting..." : "Delete entry"}
+                    <span className="inline-flex items-center gap-2">
+                      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <path d="M3 6h18" strokeLinecap="round" />
+                        <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+                        <path d="M6 6l1 14a1 1 0 0 0 1 .9h8a1 1 0 0 0 1-.9L18 6" />
+                        <path d="M10 11v6M14 11v6" strokeLinecap="round" />
+                      </svg>
+                      <span>{entryEditor.deleting ? "Deleting..." : "Delete"}</span>
+                    </span>
                   </button>
                   <button
                     type="button"
