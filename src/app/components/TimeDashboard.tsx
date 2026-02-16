@@ -122,14 +122,14 @@ function formatDateInput(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-function getEntrySeconds(entry: TimeEntry): number {
+function getEntrySeconds(entry: TimeEntry, nowMs = Date.now()): number {
   if (entry.duration >= 0) return entry.duration;
   const startedAt = new Date(entry.start).getTime();
   if (Number.isNaN(startedAt)) return 0;
-  return Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+  return Math.max(0, Math.floor((nowMs - startedAt) / 1000));
 }
 
-function getEntryEndMs(entry: TimeEntry): number {
+function getEntryEndMs(entry: TimeEntry, nowMs = Date.now()): number {
   if (entry.stop) {
     const stoppedAt = new Date(entry.stop).getTime();
     if (!Number.isNaN(stoppedAt)) return stoppedAt;
@@ -137,7 +137,7 @@ function getEntryEndMs(entry: TimeEntry): number {
   const startedAt = new Date(entry.start).getTime();
   if (Number.isNaN(startedAt)) return Number.NaN;
   if (entry.duration >= 0) return startedAt + entry.duration * 1000;
-  return Date.now();
+  return nowMs;
 }
 
 function getDayBoundsMs(dateInput: string) {
@@ -252,7 +252,7 @@ function minuteToIso(dateInput: string, minuteOfDay: number) {
   ).toISOString();
 }
 
-function buildTimelineBlocks(entries: TimeEntry[], dateInput: string) {
+function buildTimelineBlocks(entries: TimeEntry[], dateInput: string, nowMs = Date.now()) {
   const { start, end } = getDayBoundsMs(dateInput);
   const pxPerMs = HOUR_HEIGHT / (60 * 60 * 1000);
   const minDurationMs = MIN_BLOCK_HEIGHT / pxPerMs;
@@ -262,7 +262,7 @@ function buildTimelineBlocks(entries: TimeEntry[], dateInput: string) {
 
   for (const entry of sorted) {
     const startMs = new Date(entry.start).getTime();
-    const endMs = getEntryEndMs(entry);
+    const endMs = getEntryEndMs(entry, nowMs);
     if (Number.isNaN(startMs) || Number.isNaN(endMs)) continue;
 
     const visibleStart = Math.max(startMs, start);
@@ -283,7 +283,7 @@ function buildTimelineBlocks(entries: TimeEntry[], dateInput: string) {
       project: entry.project_name?.trim() || "No project",
       projectColor: entry.project_color?.trim() || null,
       timeRange: `${formatTime(entry.start)} → ${formatTime(entry.stop)}`,
-      durationLabel: formatDuration(getEntrySeconds(entry)),
+      durationLabel: formatDuration(getEntrySeconds(entry, nowMs)),
     });
   }
 
@@ -741,6 +741,42 @@ export default function TimeDashboard({
     };
   }, [mode, date, refreshTick]);
 
+  useEffect(() => {
+    if (!(mode === "team" || mode === "all")) return;
+    let active = true;
+
+    const loadTeamLive = async () => {
+      try {
+        const params = new URLSearchParams({
+          date,
+          tzOffset: String(new Date().getTimezoneOffset()),
+          _req: String(Date.now()),
+        });
+        const res = await fetch(`/api/team?${params.toString()}`, { cache: "no-store" });
+        const payload = (await res.json()) as TeamResponse;
+        if (!res.ok || payload.error || !active) return;
+        setTeamData(payload);
+        if (payload.cachedAt) {
+          setLastUpdateMeta({
+            at: payload.cachedAt,
+            dataSource: "db",
+          });
+        }
+      } catch {
+        // Silent: keep existing state when background live fetch fails.
+      }
+    };
+
+    const interval = window.setInterval(() => {
+      void loadTeamLive();
+    }, 5000);
+
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [mode, date]);
+
   const openAllCalendarsDatePicker = () => {
     const input = allCalendarsDatePickerRef.current;
     if (!input) return;
@@ -1071,13 +1107,18 @@ export default function TimeDashboard({
 
   const summary = useMemo(() => {
     if (!data) return [] as { label: string; seconds: number }[];
-    return buildSummary(data.entries);
-  }, [data]);
+    return buildSummary(
+      data.entries.map((entry) => ({
+        ...entry,
+        duration: entry.duration >= 0 ? entry.duration : getEntrySeconds(entry, relativeNowMs),
+      }))
+    );
+  }, [data, relativeNowMs]);
 
   const timeline = useMemo(() => {
     if (!data) return { blocks: [] as TimelineBlock[], maxLanes: 1 };
-    return buildTimelineBlocks(data.entries, date);
-  }, [data, date]);
+    return buildTimelineBlocks(data.entries, date, relativeNowMs);
+  }, [data, date, relativeNowMs]);
 
   const teamRanking = useMemo(() => {
     if (!teamData) return [] as TeamRankingRow[];
@@ -1093,7 +1134,7 @@ export default function TimeDashboard({
       })
       .map((memberData) => {
         const cardEntries = memberData.entries.filter((entry) => !isExcludedFromRanking(entry.project_type, entry.project_name));
-        const cardTotalSeconds = cardEntries.reduce((sum, entry) => sum + getEntrySeconds(entry), 0);
+        const cardTotalSeconds = cardEntries.reduce((sum, entry) => sum + getEntrySeconds(entry, relativeNowMs), 0);
         const isRunning = Boolean(memberData.current ?? cardEntries.find((entry) => entry.stop === null));
         return {
           name: memberData.name,
@@ -1105,7 +1146,7 @@ export default function TimeDashboard({
         if (b.seconds !== a.seconds) return b.seconds - a.seconds;
         return a.name.localeCompare(b.name);
       });
-  }, [teamData, selectedMembersLower]);
+  }, [teamData, selectedMembersLower, relativeNowMs]);
 
   const dailyRankingMaxHours = useMemo(() => {
     const maxSeconds = dailyRankingSeries.reduce((max, row) => Math.max(max, row.seconds), 0);
@@ -1135,9 +1176,9 @@ export default function TimeDashboard({
       });
     return orderedMembers.map((memberData) => ({
       name: memberData.name,
-      ...buildTimelineBlocks(memberData.entries, date),
+      ...buildTimelineBlocks(memberData.entries, date, relativeNowMs),
     }));
-  }, [teamData, date, selectedMembersLower]);
+  }, [teamData, date, selectedMembersLower, relativeNowMs]);
 
   const visibleTeamEntries = useMemo(() => {
     if (!teamData) return [] as Array<{ memberName: string; entry: TimeEntry }>;
@@ -1160,11 +1201,11 @@ export default function TimeDashboard({
       })
       .map((memberData) => ({
         memberName: memberData.name,
-        seconds: memberData.entries.reduce((sum, entry) => sum + getEntrySeconds(entry), 0),
+        seconds: memberData.entries.reduce((sum, entry) => sum + getEntrySeconds(entry, relativeNowMs), 0),
         entries: memberData.entries.length,
       }));
     return rows.sort((a, b) => b.seconds - a.seconds);
-  }, [teamData, selectedMembersLower]);
+  }, [teamData, selectedMembersLower, relativeNowMs]);
 
   const memberWeekSeries = useMemo(() => {
     if (!teamWeekData || !member) return [] as Array<{ date: string; seconds: number }>;
