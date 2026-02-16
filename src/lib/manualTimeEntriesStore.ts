@@ -90,6 +90,16 @@ function normalizeProjectName(value: string | null | undefined) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function normalizeProjectGroupingName(value: string | null | undefined) {
+  const base = (value ?? "").trim().toLowerCase();
+  if (!base) return "";
+  return base
+    .replace(/\bmeetings\b/g, "meeting")
+    .replace(/\bmeeting[\s\-_]*old\b/g, "meeting")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function normalizeDescription(value: string | null | undefined) {
   const trimmed = value?.trim() ?? "";
   return trimmed.length > 0 ? trimmed : null;
@@ -251,7 +261,7 @@ export async function listProjects(): Promise<StoredProject[]> {
 
   const byName = new Map<string, StoredProject>();
   for (const project of canonical.values()) {
-    const normalizedName = (project.project_name ?? "").trim().toLowerCase();
+    const normalizedName = normalizeProjectGroupingName(project.project_name);
     const key = normalizedName || project.project_key;
     const existing = byName.get(key);
     if (!existing) {
