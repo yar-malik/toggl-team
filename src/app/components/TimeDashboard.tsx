@@ -1296,7 +1296,13 @@ export default function TimeDashboard({
         if (selectedMembersLower.size === 0) return true;
         return selectedMembersLower.has(member.name.trim().toLowerCase());
       })
-      .sort((a, b) => a.name.localeCompare(b.name))
+      .sort((a, b) => {
+        const aIsYar = a.name.trim().toLowerCase() === "yar";
+        const bIsYar = b.name.trim().toLowerCase() === "yar";
+        if (aIsYar && !bIsYar) return -1;
+        if (!aIsYar && bIsYar) return 1;
+        return a.name.localeCompare(b.name);
+      })
       .map((member) => ({ name: member.name, days: member.days }));
   }, [teamWeekData, selectedMembersLower]);
 
@@ -1779,6 +1785,21 @@ export default function TimeDashboard({
                 >
                   7-day bar chart
                 </button>
+                {rankingView === "anomaly" &&
+                  anomalyMembers.map((member) => (
+                    <button
+                      key={`anomaly-top-tab-${member.name}`}
+                      type="button"
+                      onClick={() => setSelectedAnomalyMember(member.name)}
+                      className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
+                        selectedAnomalyMember === member.name
+                          ? "bg-sky-100 text-sky-800 shadow-sm"
+                          : "text-slate-600 hover:bg-slate-100"
+                      }`}
+                    >
+                      {member.name}
+                    </button>
+                  ))}
               </div>
               <span className="text-xs text-slate-500">
                 {rankingView === "daily"
@@ -1808,22 +1829,6 @@ export default function TimeDashboard({
               </p>
             ) : rankingView === "anomaly" ? (
               <>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {anomalyMembers.map((member) => (
-                    <button
-                      key={`anomaly-tab-${member.name}`}
-                      type="button"
-                      onClick={() => setSelectedAnomalyMember(member.name)}
-                      className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                        selectedAnomalyMember === member.name
-                          ? "border-sky-300 bg-sky-100 text-sky-800"
-                          : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                      }`}
-                    >
-                      {member.name}
-                    </button>
-                  ))}
-                </div>
                 <div className="mt-3 grid grid-cols-[3.2rem_1fr] gap-2">
                   <div className="relative h-44">
                     {anomalyAxisTicks.map((tick) => (
