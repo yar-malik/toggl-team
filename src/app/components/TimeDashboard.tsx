@@ -91,6 +91,7 @@ const DRAG_SNAP_MINUTES = 5;
 const CLICK_CREATE_DEFAULT_MINUTES = 60;
 const CLICK_CREATE_MIN_MINUTES = 5;
 const CLICK_CREATE_MAX_MINUTES = 120;
+const TEAM_LIVE_SYNC_MS = 1500;
 const RANKING_ENTRY_CAP_SECONDS = 4 * 60 * 60;
 const EXCLUDED_PROJECT_NAME = "non-work-task";
 const ALL_CALENDAR_MEMBER_HEADER_HEIGHT = 34;
@@ -820,9 +821,11 @@ export default function TimeDashboard({
       }
     };
 
+    void loadTeamLive();
+
     const interval = window.setInterval(() => {
       void loadTeamLive();
-    }, 5000);
+    }, TEAM_LIVE_SYNC_MS);
 
     return () => {
       active = false;
