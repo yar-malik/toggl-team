@@ -1834,20 +1834,29 @@ export default function TimeDashboard({
                 >
                   All
                 </button>
-                {rankingMemberTabs.map((memberName) => (
-                  <button
-                    key={`ranking-member-tab-${memberName}`}
-                    type="button"
-                    onClick={() => setSelectedAnomalyMember(memberName)}
-                    className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
-                      selectedAnomalyMember === memberName
-                        ? "bg-sky-100 text-sky-800 shadow-sm"
-                        : "text-slate-600 hover:bg-slate-100"
-                    }`}
-                  >
-                    {memberName}
-                  </button>
-                ))}
+                {rankingMemberTabs.map((memberName) => {
+                  const hoursMap = new Map<string, number>();
+                  const series = rankingView === "daily" ? dailyRankingSeries : rankingView === "weekly" ? weeklyRankingSeries : monthlyRankingSeries;
+                  series.forEach((row) => hoursMap.set(row.name, row.seconds / 3600));
+                  const hours = hoursMap.get(memberName) ?? 0;
+                  return (
+                    <button
+                      key={`ranking-member-tab-${memberName}`}
+                      type="button"
+                      onClick={() => setSelectedAnomalyMember(memberName)}
+                      className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold ${
+                        selectedAnomalyMember === memberName
+                          ? "bg-sky-100 text-sky-800 shadow-sm"
+                          : "text-slate-600 hover:bg-slate-100"
+                      }`}
+                    >
+                      {memberName}
+                      <span className="rounded-full bg-white/50 px-1.5 py-0.5 text-[10px] text-slate-600">
+                        {hours.toFixed(1)}h
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
               <span className="text-xs text-slate-500">
                 {rankingView === "daily"
