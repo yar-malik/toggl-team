@@ -38,9 +38,8 @@ export default async function TrackPage() {
     <TimeDashboard
       members={members.map((m) => ({ name: m.name }))}
       initialMode="all"
-      restrictToMember={memberName}
-      selfMode="all"
-      allowTeamOverview={false}
+      allowAllCalendars={true}
+      allowTeamOverview={true}
     />
   );
 }
