@@ -56,9 +56,7 @@ export async function POST(request: NextRequest) {
   if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
     return NextResponse.json({ error: "durationMinutes must be > 0" }, { status: 400 });
   }
-  if (Math.round(durationMinutes * 60) > MAX_TIME_ENTRY_SECONDS) {
-    return NextResponse.json({ error: "A time entry can't be more than 2 hours." }, { status: 400 });
-  }
+
 
   try {
     await autoStopLongRunningTimers([canonicalMember], body.tzOffset);

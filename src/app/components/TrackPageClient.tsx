@@ -59,7 +59,7 @@ type EntryEditorState = {
 const CALENDAR_HOUR_HEIGHT = 56;
 const MIN_ENTRY_MINUTES = 15;
 const DRAG_SNAP_MINUTES = 5;
-const MAX_ENTRY_MINUTES = 120;
+const MAX_ENTRY_MINUTES = 24 * 60; // 24 hours max
 const CLICK_CREATE_DEFAULT_MINUTES = 60;
 const ZOOM_LEVELS = [48, 56, 68, 80, 96, 112] as const;
 

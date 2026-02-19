@@ -32,8 +32,8 @@ type EnsureProjectResult = {
   projectName: string | null;
 };
 
-export const MAX_TIME_ENTRY_SECONDS = 2 * 60 * 60;
-export const MAX_TIME_ENTRY_ERROR_MESSAGE = "A time entry can't be more than 2 hours.";
+export const MAX_TIME_ENTRY_SECONDS = 24 * 60 * 60; // 24 hours max
+export const MAX_TIME_ENTRY_ERROR_MESSAGE = "A time entry can't be more than 24 hours.";
 
 export function isMaxTimeEntryError(message: string | null | undefined) {
   return (message ?? "").includes(MAX_TIME_ENTRY_ERROR_MESSAGE);
