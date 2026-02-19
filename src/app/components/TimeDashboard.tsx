@@ -551,6 +551,8 @@ export default function TimeDashboard({
   const [mode, setMode] = useState<"member" | "team" | "all">("all");
   const [allCalendarView, setAllCalendarView] = useState<"calendar" | "list" | "timesheet">("calendar");
   const [selectedEntry, setSelectedEntry] = useState<EntryModalData | null>(null);
+  const [isCreatingEntry, setIsCreatingEntry] = useState(false);
+  const [createEntryMember, setCreateEntryMember] = useState<string>("");
   const [entryEditor, setEntryEditor] = useState<{
     description: string;
     project: string;
@@ -1579,12 +1581,11 @@ export default function TimeDashboard({
 
   const hideHoverTooltip = () => setHoverTooltip(null);
 
-  const createEntryAtCalendarPosition = async (
+  const createEntryAtCalendarPosition = (
     memberName: string,
     clientY: number,
     containerEl: HTMLElement
   ) => {
-    console.log("[DEBUG] Calendar click started", { memberName, clientY });
     const bounds = containerEl.getBoundingClientRect();
     const relativeY = Math.max(0, Math.min(bounds.height, clientY - bounds.top));
     const clickedMinute = Math.max(0, Math.min(24 * 60 - 1, snapMinutes((relativeY / HOUR_HEIGHT) * 60)));
@@ -1593,33 +1594,24 @@ export default function TimeDashboard({
       CLICK_CREATE_MAX_MINUTES,
       Math.max(CLICK_CREATE_MIN_MINUTES, Math.min(CLICK_CREATE_DEFAULT_MINUTES, remainingMinutes))
     );
-    console.log("[DEBUG] Creating entry", { clickedMinute, durationMinutes, date });
 
-    try {
-      const res = await fetch("/api/time-entries/manual", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          member: memberName,
-          description: "",
-          project: "",
-          startAt: minuteToIso(date, clickedMinute),
-          durationMinutes,
-          tzOffset: new Date().getTimezoneOffset(),
-        }),
-      });
-      console.log("[DEBUG] API response status:", res.status);
-      const payload = (await res.json()) as { error?: string };
-      console.log("[DEBUG] API response payload:", payload);
-      if (!res.ok || payload.error) throw new Error(payload.error || "Failed to create time slot");
-      window.dispatchEvent(new CustomEvent("voho-entries-changed", { detail: { memberName } }));
-      window.dispatchEvent(new CustomEvent("voho-team-hours-changed"));
-      console.log("[DEBUG] Entry created successfully");
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Failed to create time slot";
-      console.error("[Calendar Click Error]", errorMessage, err);
-      setError(errorMessage);
-    }
+    // Open modal for creating new entry
+    const startIso = minuteToIso(date, clickedMinute);
+    const endIso = minuteToIso(date, clickedMinute + durationMinutes);
+    
+    setCreateEntryMember(memberName);
+    setIsCreatingEntry(true);
+    setEntryEditor({
+      description: "",
+      project: "",
+      startTime: formatTimeInputLocal(startIso),
+      stopTime: formatTimeInputLocal(endIso),
+      saving: false,
+      deleting: false,
+      error: null,
+    });
+    setModalProjectPickerOpen(false);
+    setModalProjectSearch("");
   };
 
   const placeHoverTooltip = (event: ReactMouseEvent<HTMLElement>, text: string) => {
@@ -2853,11 +2845,12 @@ export default function TimeDashboard({
         </div>
       )}
 
-      {selectedEntry && (
+      {(selectedEntry || isCreatingEntry) && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4"
           onClick={() => {
             setSelectedEntry(null);
+            setIsCreatingEntry(false);
             setEntryEditor(null);
           }}
         >
@@ -2867,69 +2860,77 @@ export default function TimeDashboard({
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-sky-100 text-[#0BA5E9] hover:bg-sky-200"
-                  title="Start new timer with this entry"
-                  onClick={async () => {
-                    if (!selectedEntry || !entryEditor) return;
-                    const res = await fetch("/api/time-entries/start", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        member: selectedEntry.memberName,
-                        description: entryEditor.description || selectedEntry.description,
-                        project: entryEditor.project || selectedEntry.project,
-                        tzOffset: new Date().getTimezoneOffset(),
-                      }),
-                    });
-                    if (res.ok) {
-                      setSelectedEntry(null);
-                      setEntryEditor(null);
-                      setRefreshTick((value) => value + 1);
-                      window.dispatchEvent(
-                        new CustomEvent("voho-timer-changed", {
-                          detail: {
-                            memberName: selectedEntry.memberName,
-                            isRunning: true,
+                {!isCreatingEntry && (
+                  <>
+                    <button
+                      type="button"
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-sky-100 text-[#0BA5E9] hover:bg-sky-200"
+                      title="Start new timer with this entry"
+                      onClick={async () => {
+                        if (!selectedEntry || !entryEditor) return;
+                        const res = await fetch("/api/time-entries/start", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            member: selectedEntry.memberName,
                             description: entryEditor.description || selectedEntry.description,
-                            projectName: entryEditor.project || selectedEntry.project,
-                          },
-                        })
-                      );
-                    }
-                  }}
-                >
-                  ▶
-                </button>
-                <button
-                  type="button"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"
-                  title="Duplicate values"
-                  onClick={() => {
-                    if (!entryEditor || !selectedEntry) return;
-                    setEntryEditor({
-                      ...entryEditor,
-                      description: selectedEntry.description === "(No description)" ? "" : selectedEntry.description,
-                      project: selectedEntry.project === "No project" ? "" : selectedEntry.project,
-                    });
-                  }}
-                >
-                  ⧉
-                </button>
-                <button
-                  type="button"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"
-                  title="Entry actions"
-                >
-                  ⋮
-                </button>
+                            project: entryEditor.project || selectedEntry.project,
+                            tzOffset: new Date().getTimezoneOffset(),
+                          }),
+                        });
+                        if (res.ok) {
+                          setSelectedEntry(null);
+                          setEntryEditor(null);
+                          setRefreshTick((value) => value + 1);
+                          window.dispatchEvent(
+                            new CustomEvent("voho-timer-changed", {
+                              detail: {
+                                memberName: selectedEntry.memberName,
+                                isRunning: true,
+                                description: entryEditor.description || selectedEntry.description,
+                                projectName: entryEditor.project || selectedEntry.project,
+                              },
+                            })
+                          );
+                        }
+                      }}
+                    >
+                      ▶
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"
+                      title="Duplicate values"
+                      onClick={() => {
+                        if (!entryEditor || !selectedEntry) return;
+                        setEntryEditor({
+                          ...entryEditor,
+                          description: selectedEntry.description === "(No description)" ? "" : selectedEntry.description,
+                          project: selectedEntry.project === "No project" ? "" : selectedEntry.project,
+                        });
+                      }}
+                    >
+                      ⧉
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"
+                      title="Entry actions"
+                    >
+                      ⋮
+                    </button>
+                  </>
+                )}
+                {isCreatingEntry && (
+                  <span className="text-lg font-semibold text-slate-800">Create New Entry</span>
+                )}
               </div>
               <button
                 type="button"
                 className="rounded-full border border-slate-200 px-3 py-1 text-sm text-slate-600"
                 onClick={() => {
                   setSelectedEntry(null);
+                  setIsCreatingEntry(false);
                   setEntryEditor(null);
                 }}
               >
@@ -3039,7 +3040,7 @@ export default function TimeDashboard({
                     {(() => {
                       const startIso = buildIsoFromDateAndTime(date, entryEditor.startTime);
                       const stopIso = buildIsoFromDateAndTime(date, entryEditor.stopTime);
-                      if (!startIso || !stopIso) return formatTimerClock(selectedEntry.durationSeconds);
+                      if (!startIso || !stopIso) return formatTimerClock(selectedEntry?.durationSeconds ?? 0);
                       const seconds = Math.max(0, Math.floor((new Date(stopIso).getTime() - new Date(startIso).getTime()) / 1000));
                       return formatTimerClock(seconds);
                     })()}
@@ -3047,109 +3048,176 @@ export default function TimeDashboard({
                 </div>
                 {entryEditor.error && <p className="text-xs text-rose-600">{entryEditor.error}</p>}
                 <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={entryEditor.saving || entryEditor.deleting}
-                    onClick={async () => {
-                      if (!selectedEntry) return;
-                      const shouldDelete = window.confirm("Delete this time entry?");
-                      if (!shouldDelete) return;
-                      setEntryEditor((prev) => (prev ? { ...prev, deleting: true, error: null } : prev));
-                      try {
-                        const res = await fetch("/api/time-entries/delete", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({
-                            member: selectedEntry.memberName,
-                            entryId: selectedEntry.entryId,
-                          }),
-                        });
-                        const payload = (await res.json()) as { error?: string; wasRunning?: boolean };
-                        if (!res.ok || payload.error) {
-                          setEntryEditor((prev) =>
-                            prev ? { ...prev, deleting: false, error: payload.error || "Failed to delete entry." } : prev
-                          );
-                          return;
-                        }
-                        setSelectedEntry(null);
-                        setEntryEditor(null);
-                        setRefreshTick((value) => value + 1);
-                        window.dispatchEvent(
-                          new CustomEvent("voho-entries-changed", { detail: { memberName: selectedEntry.memberName } })
-                        );
-                        if (payload.wasRunning) {
-                          window.dispatchEvent(
-                            new CustomEvent("voho-timer-changed", {
-                              detail: { memberName: selectedEntry.memberName, isRunning: false },
-                            })
-                          );
-                        }
-                      } catch {
-                        setEntryEditor((prev) => (prev ? { ...prev, deleting: false, error: "Failed to delete entry." } : prev));
-                      }
-                    }}
-                    className="rounded-xl border border-rose-300 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
-                    aria-label={entryEditor.deleting ? "Deleting entry" : "Delete entry"}
-                  >
-                    <span className="inline-flex items-center gap-2">
-                      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                        <path d="M3 6h18" strokeLinecap="round" />
-                        <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
-                        <path d="M6 6l1 14a1 1 0 0 0 1 .9h8a1 1 0 0 0 1-.9L18 6" />
-                        <path d="M10 11v6M14 11v6" strokeLinecap="round" />
-                      </svg>
-                      <span>{entryEditor.deleting ? "Deleting..." : "Delete"}</span>
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    disabled={entryEditor.saving || entryEditor.deleting}
-                    onClick={async () => {
-                      if (!selectedEntry) return;
-                      const startIso = buildIsoFromDateAndTime(date, entryEditor.startTime);
-                      const stopIso = buildIsoFromDateAndTime(date, entryEditor.stopTime);
-                      if (!startIso || !stopIso || new Date(stopIso).getTime() <= new Date(startIso).getTime()) {
-                        setEntryEditor((prev) =>
-                          prev ? { ...prev, error: "Choose a valid start and end time (end must be after start)." } : prev
-                        );
-                        return;
-                      }
-                      setEntryEditor((prev) => (prev ? { ...prev, saving: true, error: null } : prev));
-                      try {
-                        const res = await fetch("/api/time-entries/update", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({
-                            member: selectedEntry.memberName,
-                            entryId: selectedEntry.entryId,
-                            description: entryEditor.description,
-                            project: entryEditor.project,
-                            startAt: startIso,
-                            stopAt: stopIso,
-                            tzOffset: new Date().getTimezoneOffset(),
-                          }),
-                        });
-                        const payload = (await res.json()) as { error?: string };
-                        if (!res.ok || payload.error) {
-                          setEntryEditor((prev) =>
-                            prev ? { ...prev, saving: false, error: payload.error || "Failed to update entry." } : prev
-                          );
-                          return;
-                        }
-                        setSelectedEntry(null);
-                        setEntryEditor(null);
-                        setRefreshTick((value) => value + 1);
-                        window.dispatchEvent(
-                          new CustomEvent("voho-entries-changed", { detail: { memberName: selectedEntry.memberName } })
-                        );
-                      } catch {
-                        setEntryEditor((prev) => (prev ? { ...prev, saving: false, error: "Failed to update entry." } : prev));
-                      }
-                    }}
-                    className="w-[180px] rounded-xl bg-[#0BA5E9] px-4 py-2.5 text-xl font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
-                  >
-                    {entryEditor.saving ? "Saving..." : "Save changes"}
-                  </button>
+                  {isCreatingEntry ? (
+                    <>
+                      <button
+                        type="button"
+                        disabled={entryEditor.saving}
+                        onClick={() => {
+                          setIsCreatingEntry(false);
+                          setEntryEditor(null);
+                        }}
+                        className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={entryEditor.saving}
+                        onClick={async () => {
+                          const startIso = buildIsoFromDateAndTime(date, entryEditor.startTime);
+                          const stopIso = buildIsoFromDateAndTime(date, entryEditor.stopTime);
+                          if (!startIso || !stopIso || new Date(stopIso).getTime() <= new Date(startIso).getTime()) {
+                            setEntryEditor((prev) =>
+                              prev ? { ...prev, error: "Choose a valid start and end time (end must be after start)." } : prev
+                            );
+                            return;
+                          }
+                          const durationSeconds = Math.floor((new Date(stopIso).getTime() - new Date(startIso).getTime()) / 1000);
+                          setEntryEditor((prev) => (prev ? { ...prev, saving: true, error: null } : prev));
+                          try {
+                            const res = await fetch("/api/time-entries/manual", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                member: createEntryMember,
+                                description: entryEditor.description,
+                                project: entryEditor.project,
+                                startAt: startIso,
+                                durationMinutes: Math.ceil(durationSeconds / 60),
+                                tzOffset: new Date().getTimezoneOffset(),
+                              }),
+                            });
+                            const payload = (await res.json()) as { error?: string };
+                            if (!res.ok || payload.error) {
+                              setEntryEditor((prev) =>
+                                prev ? { ...prev, saving: false, error: payload.error || "Failed to create entry." } : prev
+                              );
+                              return;
+                            }
+                            setIsCreatingEntry(false);
+                            setEntryEditor(null);
+                            setRefreshTick((value) => value + 1);
+                            window.dispatchEvent(
+                              new CustomEvent("voho-entries-changed", { detail: { memberName: createEntryMember } })
+                            );
+                            window.dispatchEvent(new CustomEvent("voho-team-hours-changed"));
+                          } catch {
+                            setEntryEditor((prev) => (prev ? { ...prev, saving: false, error: "Failed to create entry." } : prev));
+                          }
+                        }}
+                        className="w-[180px] rounded-xl bg-[#0BA5E9] px-4 py-2.5 text-xl font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+                      >
+                        {entryEditor.saving ? "Creating..." : "Create entry"}
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        disabled={entryEditor.saving || entryEditor.deleting}
+                        onClick={async () => {
+                          if (!selectedEntry) return;
+                          const shouldDelete = window.confirm("Delete this time entry?");
+                          if (!shouldDelete) return;
+                          setEntryEditor((prev) => (prev ? { ...prev, deleting: true, error: null } : prev));
+                          try {
+                            const res = await fetch("/api/time-entries/delete", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                member: selectedEntry.memberName,
+                                entryId: selectedEntry.entryId,
+                              }),
+                            });
+                            const payload = (await res.json()) as { error?: string; wasRunning?: boolean };
+                            if (!res.ok || payload.error) {
+                              setEntryEditor((prev) =>
+                                prev ? { ...prev, deleting: false, error: payload.error || "Failed to delete entry." } : prev
+                              );
+                              return;
+                            }
+                            setSelectedEntry(null);
+                            setEntryEditor(null);
+                            setRefreshTick((value) => value + 1);
+                            window.dispatchEvent(
+                              new CustomEvent("voho-entries-changed", { detail: { memberName: selectedEntry.memberName } })
+                            );
+                            if (payload.wasRunning) {
+                              window.dispatchEvent(
+                                new CustomEvent("voho-timer-changed", {
+                                  detail: { memberName: selectedEntry.memberName, isRunning: false },
+                                })
+                              );
+                            }
+                          } catch {
+                            setEntryEditor((prev) => (prev ? { ...prev, deleting: false, error: "Failed to delete entry." } : prev));
+                          }
+                        }}
+                        className="rounded-xl border border-rose-300 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                        aria-label={entryEditor.deleting ? "Deleting entry" : "Delete entry"}
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                            <path d="M3 6h18" strokeLinecap="round" />
+                            <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+                            <path d="M6 6l1 14a1 1 0 0 0 1 .9h8a1 1 0 0 0 1-.9L18 6" />
+                            <path d="M10 11v6M14 11v6" strokeLinecap="round" />
+                          </svg>
+                          <span>{entryEditor.deleting ? "Deleting..." : "Delete"}</span>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={entryEditor.saving || entryEditor.deleting}
+                        onClick={async () => {
+                          if (!selectedEntry) return;
+                          const startIso = buildIsoFromDateAndTime(date, entryEditor.startTime);
+                          const stopIso = buildIsoFromDateAndTime(date, entryEditor.stopTime);
+                          if (!startIso || !stopIso || new Date(stopIso).getTime() <= new Date(startIso).getTime()) {
+                            setEntryEditor((prev) =>
+                              prev ? { ...prev, error: "Choose a valid start and end time (end must be after start)." } : prev
+                            );
+                            return;
+                          }
+                          setEntryEditor((prev) => (prev ? { ...prev, saving: true, error: null } : prev));
+                          try {
+                            const res = await fetch("/api/time-entries/update", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                member: selectedEntry.memberName,
+                                entryId: selectedEntry.entryId,
+                                description: entryEditor.description,
+                                project: entryEditor.project,
+                                startAt: startIso,
+                                stopAt: stopIso,
+                                tzOffset: new Date().getTimezoneOffset(),
+                              }),
+                            });
+                            const payload = (await res.json()) as { error?: string };
+                            if (!res.ok || payload.error) {
+                              setEntryEditor((prev) =>
+                                prev ? { ...prev, saving: false, error: payload.error || "Failed to update entry." } : prev
+                              );
+                              return;
+                            }
+                            setSelectedEntry(null);
+                            setEntryEditor(null);
+                            setRefreshTick((value) => value + 1);
+                            window.dispatchEvent(
+                              new CustomEvent("voho-entries-changed", { detail: { memberName: selectedEntry.memberName } })
+                            );
+                          } catch {
+                            setEntryEditor((prev) => (prev ? { ...prev, saving: false, error: "Failed to update entry." } : prev));
+                          }
+                        }}
+                        className="w-[180px] rounded-xl bg-[#0BA5E9] px-4 py-2.5 text-xl font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+                      >
+                        {entryEditor.saving ? "Saving..." : "Save changes"}
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             )}
