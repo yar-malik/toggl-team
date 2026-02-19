@@ -1121,7 +1121,9 @@ export default function TimeDashboard({
     const onEntriesChanged = (event: Event) => {
       const custom = event as CustomEvent<{ memberName?: string }>;
       const changedMemberName = custom.detail?.memberName?.trim();
-      if (!changedMemberName) {
+      
+      // In team/all mode, do a full refresh instead of partial update
+      if (mode === "team" || mode === "all" || !changedMemberName) {
         setRefreshTick((value) => value + 1);
         return;
       }
@@ -1177,7 +1179,7 @@ export default function TimeDashboard({
     return () => {
       window.removeEventListener("voho-entries-changed", onEntriesChanged as EventListener);
     };
-  }, [date, member]);
+  }, [date, member, mode]);
 
   useEffect(() => {
     const onTeamHoursChanged = () => {
